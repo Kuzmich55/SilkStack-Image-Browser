@@ -28,7 +28,9 @@ const SmartLibrary: React.FC<SmartLibraryProps> = () => {
   const isAutoTagging = useImageStore((state) => state.isAutoTagging);
   const autoTaggingProgress = useImageStore((state) => state.autoTaggingProgress);
   const startClustering = useImageStore((state) => state.startClustering);
+  const cancelClustering = useImageStore((state) => state.cancelClustering);
   const startAutoTagging = useImageStore((state) => state.startAutoTagging);
+  const cancelAutoTagging = useImageStore((state) => state.cancelAutoTagging);
   const setClusterNavigationContext = useImageStore((state) => state.setClusterNavigationContext);
   // const selectedImages = useImageStore((state) => state.selectedImages); // Unused in this file directly
   const selectionTotalImages = useImageStore((state) => state.selectionTotalImages);
@@ -110,53 +112,6 @@ const SmartLibrary: React.FC<SmartLibraryProps> = () => {
 
   return (
     <section className="flex flex-col h-full min-h-0 pt-3">
-      {(clusteringProgress || autoTaggingProgress) && (
-        <div className="grid gap-2 mb-3 mt-2">
-          {clusteringProgress && (
-            <div className="px-3 py-2 rounded-md bg-blue-500/10 border border-blue-500/20 text-xs text-blue-200">
-              <div className="flex items-center justify-between mb-1">
-                <span>{clusteringProgress.message}</span>
-                <span>
-                  {clusteringProgress.current}/{clusteringProgress.total}
-                </span>
-              </div>
-              <div className="h-1.5 w-full bg-blue-900/40 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-blue-400 transition-all duration-300"
-                  style={{
-                    width:
-                      clusteringProgress.total > 0
-                        ? `${(clusteringProgress.current / clusteringProgress.total) * 100}%`
-                        : '0%',
-                  }}
-                />
-              </div>
-            </div>
-          )}
-          {autoTaggingProgress && (
-            <div className="px-3 py-2 rounded-md bg-purple-500/10 border border-purple-500/20 text-xs text-purple-200">
-              <div className="flex items-center justify-between mb-1">
-                <span>{autoTaggingProgress.message}</span>
-                <span>
-                  {autoTaggingProgress.current}/{autoTaggingProgress.total}
-                </span>
-              </div>
-              <div className="h-1.5 w-full bg-purple-900/40 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-purple-400 transition-all duration-300"
-                  style={{
-                    width:
-                      autoTaggingProgress.total > 0
-                        ? `${(autoTaggingProgress.current / autoTaggingProgress.total) * 100}%`
-                        : '0%',
-                  }}
-                />
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
       <div className="flex-1 min-h-0 overflow-y-auto">
         {activeCluster ? (
           <StackExpandedView
@@ -208,6 +163,10 @@ const SmartLibrary: React.FC<SmartLibraryProps> = () => {
         filteredCount={safeFilteredImages.length}
         totalCount={selectionTotalImages}
         enrichmentProgress={enrichmentProgress}
+        autoTaggingProgress={autoTaggingProgress}
+        clusteringProgress={clusteringProgress}
+        onCancelAutoTag={cancelAutoTagging}
+        onCancelClustering={cancelClustering}
         showSmartActions={true}
         onCluster={handleGenerateClusters}
         onAutoTag={handleGenerateAutoTags}

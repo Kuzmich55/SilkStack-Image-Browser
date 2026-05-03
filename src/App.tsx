@@ -120,6 +120,10 @@ export default function App() {
   const setActiveView = useImageStore((state) => state.setActiveView);
   const isAutoTagging = useImageStore((state) => state.isAutoTagging);
   const startAutoTagging = useImageStore((state) => state.startAutoTagging);
+  const cancelAutoTagging = useImageStore((state) => state.cancelAutoTagging);
+  const autoTaggingProgress = useImageStore((state) => state.autoTaggingProgress);
+  const cancelClustering = useImageStore((state) => state.cancelClustering);
+  const clusteringProgress = useImageStore((state) => state.clusteringProgress);
   const toggleFavorite = useImageStore((state) => state.toggleFavorite);
   const addTagToImage = useImageStore((state) => state.addTagToImage);
   const removeTagFromImage = useImageStore((state) => state.removeTagFromImage);
@@ -936,6 +940,10 @@ export default function App() {
               filteredCount={safeFilteredImages.length}
               totalCount={selectionTotalImages}
               enrichmentProgress={enrichmentProgress}
+              autoTaggingProgress={autoTaggingProgress}
+              clusteringProgress={clusteringProgress}
+              onCancelAutoTag={cancelAutoTagging}
+              onCancelClustering={cancelClustering}
               showStackingToggle={true}
               showAutoTag={true}
               onAutoTag={handleAutoTag}
