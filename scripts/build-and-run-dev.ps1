@@ -1,3 +1,4 @@
+Set-Location -Path "C:\Projects\AI-Images-Browser\"
 Write-Host "Clearing previous build artifacts..."
 Remove-Item -Path "dist" -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item -Path "dist-electron" -Recurse -Force -ErrorAction SilentlyContinue
