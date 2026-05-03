@@ -6,7 +6,7 @@ The development is done in Windows, so use Windows-specific tools and commands w
 
 When working on this codebase:
 
-- Always make sure the build works
+- Always make sure the build works (npm run build)
 - Always read existing code before modifying
 - Maintain backward compatibility with cached data
 - Consider performance impact on large collections

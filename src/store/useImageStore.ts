@@ -2013,31 +2013,6 @@ export const useImageStore = create<ImageState>((set, get) => {
                 }
 
                 // Restore auto-tags and merge into standard annotations
-                const { images, annotations } = get();
-
-                // Migrate any existing autoTags from images (from prior version) into annotations
-                const migrationAnnotations: ImageAnnotations[] = [];
-                for (const img of images) {
-                    if ((img as any).autoTags && (img as any).autoTags.length > 0) {
-                        const current = annotations.get(img.id);
-                        const existingTags = current?.tags ?? [];
-                        const newTags = (img as any).autoTags.filter((t: string) => !existingTags.includes(t));
-                        if (newTags.length > 0) {
-                            migrationAnnotations.push({
-                                imageId: img.id,
-                                isFavorite: current?.isFavorite ?? false,
-                                tags: [...existingTags, ...newTags],
-                                addedAt: current?.addedAt ?? Date.now(),
-                                updatedAt: Date.now(),
-                            });
-                        }
-                    }
-                }
-                if (migrationAnnotations.length > 0) {
-                    const { bulkSaveAnnotations } = await import('../services/imageAnnotationsStorage');
-                    await bulkSaveAnnotations(migrationAnnotations);
-                }
-
                 const autoTagCache = await loadAutoTagCache(directoryPath, scanSubfolders);
                 if (autoTagCache?.autoTags && Object.keys(autoTagCache.autoTags).length > 0) {
                     const tagMap = new Map<string, string[]>();
@@ -2046,7 +2021,6 @@ export const useImageStore = create<ImageState>((set, get) => {
                         tagMap.set(id, normalizedTags);
                     }
 
-                    // Merge cached tags into annotations (skip if already present)
                     const cacheAnnotations: ImageAnnotations[] = [];
                     const currentAnnotations = get().annotations;
                     for (const [imageId, newTags] of tagMap) {
@@ -2075,34 +2049,12 @@ export const useImageStore = create<ImageState>((set, get) => {
                             }
                             const newImages = state.images.map(img => {
                                 const annotation = newAnnotations.get(img.id);
-                                // Strip autoTags from legacy data
-                                const { autoTags, autoTagsGeneratedAt, ...rest } = img as any;
-                                return annotation ? { ...rest, tags: annotation.tags } : rest;
+                                return annotation ? { ...img, tags: annotation.tags } : img;
                             });
                             return _updateState({ ...state, annotations: newAnnotations }, newImages);
                         });
-                    } else {
-                        // Still strip legacy autoTags from images even if no new tags to add
-                        set(state => {
-                            const newImages = state.images.map(img => {
-                                const { autoTags, autoTagsGeneratedAt, ...rest } = img as any;
-                                return rest;
-                            });
-                            return _updateState({ ...state }, newImages);
-                        });
                     }
                     console.log(`Restored auto-tags for ${tagMap.size} images from cache as standard tags`);
-                } else {
-                    // No cache, but still strip legacy autoTags from images
-                    if (migrationAnnotations.length > 0 || images.some(img => (img as any).autoTags)) {
-                        set(state => {
-                            const newImages = state.images.map(img => {
-                                const { autoTags, autoTagsGeneratedAt, ...rest } = img as any;
-                                return rest;
-                            });
-                            return _updateState({ ...state }, newImages);
-                        });
-                    }
                 }
             } catch (error) {
                 console.debug('Smart library cache not available:', error);
