@@ -13,6 +13,7 @@ interface FooterProps {
   enrichmentProgress?: { processed: number; total: number } | null;
   showStackingToggle?: boolean;
   showSmartActions?: boolean;
+  showAutoTag?: boolean;
   onCluster?: () => void;
   onAutoTag?: () => void;
   isClustering?: boolean;
@@ -41,6 +42,7 @@ const Footer: React.FC<FooterProps> = ({
   enrichmentProgress,
   showStackingToggle = false,
   showSmartActions = false,
+  showAutoTag = false,
   onCluster,
   onAutoTag,
   isClustering = false,
@@ -123,6 +125,24 @@ const Footer: React.FC<FooterProps> = ({
               <Layers size={14} className={isClustering ? 'animate-pulse' : ''}/>
               <span className="hidden xl:inline">Cluster</span>
             </button>
+            <button
+              onClick={onAutoTag}
+              disabled={!hasDirectories || isAutoTagging}
+              className={`inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                isAutoTagging ? 'text-purple-400/50 cursor-wait' : 'text-purple-400 hover:bg-purple-500/10 hover:text-purple-300'
+              }`}
+              title="Generate Auto-Tags"
+            >
+              <Sparkles size={14} className={isAutoTagging ? 'animate-pulse' : ''}/>
+              <span className="hidden xl:inline">Auto-Tag</span>
+            </button>
+            <div className="w-px h-5 bg-gray-700/50 mx-1"></div>
+          </div>
+        )}
+
+        {/* Standalone Auto-Tag button (for Library tab, independent of Smart Actions) */}
+        {showAutoTag && !showSmartActions && (
+          <div className="flex items-center gap-2 mr-2">
             <button
               onClick={onAutoTag}
               disabled={!hasDirectories || isAutoTagging}

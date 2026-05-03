@@ -118,6 +118,8 @@ export default function App() {
   const cleanupInvalidImages = useImageStore((state) => state.cleanupInvalidImages);
   const activeView = useImageStore((state) => state.activeView);
   const setActiveView = useImageStore((state) => state.setActiveView);
+  const isAutoTagging = useImageStore((state) => state.isAutoTagging);
+  const startAutoTagging = useImageStore((state) => state.startAutoTagging);
   const toggleFavorite = useImageStore((state) => state.toggleFavorite);
   const addTagToImage = useImageStore((state) => state.addTagToImage);
   const removeTagFromImage = useImageStore((state) => state.removeTagFromImage);
@@ -739,6 +741,11 @@ export default function App() {
   const hasDirectories = safeDirectories.length > 0;
   const directoryPath = selectedImage ? safeDirectories.find(d => d.id === selectedImage.directoryId)?.path : undefined;
 
+  const handleAutoTag = useCallback(() => {
+    if (!primaryPath) return;
+    startAutoTagging(primaryPath, scanSubfolders);
+  }, [primaryPath, scanSubfolders, startAutoTagging]);
+
   const layoutOffset = hasDirectories 
     ? (isSidebarCollapsed ? 'var(--sidebar-collapsed-width)' : 'var(--sidebar-width)') 
     : '0px';
@@ -930,6 +937,10 @@ export default function App() {
               totalCount={selectionTotalImages}
               enrichmentProgress={enrichmentProgress}
               showStackingToggle={true}
+              showAutoTag={true}
+              onAutoTag={handleAutoTag}
+              isAutoTagging={isAutoTagging}
+              hasDirectories={hasDirectories}
               isPreviewOpen={!!previewImage}
               onTogglePreview={() => {
                 if (previewImage) {
