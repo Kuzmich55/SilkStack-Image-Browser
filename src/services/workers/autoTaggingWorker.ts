@@ -108,7 +108,7 @@ async function startAutoTagging(
           generatedTags = generatedTags.slice(0, options.topN);
       }
 
-      autoTags[image.id] = generatedTags.map(t => ({
+      autoTags[image.id] = [...new Set(generatedTags)].map(t => ({
           tag: t,
           sourceType: 'prompt'
       }));

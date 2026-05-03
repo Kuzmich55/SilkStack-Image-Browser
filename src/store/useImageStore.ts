@@ -1888,7 +1888,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                         const generatedAt = Date.now();
                         const tagMap = new Map<string, string[]>();
                         Object.entries(payload.autoTags || {}).forEach(([id, tags]: [string, AutoTag[]]) => {
-                            const normalizedTags = (tags || []).map((tag) => tag.tag).filter(Boolean);
+                            const normalizedTags = [...new Set((tags || []).map((tag) => tag.tag).filter(Boolean))];
                             tagMap.set(id, normalizedTags);
                         });
 
@@ -2017,7 +2017,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                 if (autoTagCache?.autoTags && Object.keys(autoTagCache.autoTags).length > 0) {
                     const tagMap = new Map<string, string[]>();
                     for (const [id, tags] of Object.entries(autoTagCache.autoTags)) {
-                        const normalizedTags = (tags as any[] || []).map((t: any) => t.tag).filter(Boolean);
+                        const normalizedTags = [...new Set((tags as any[] || []).map((t: any) => t.tag).filter(Boolean))];
                         tagMap.set(id, normalizedTags);
                     }
 

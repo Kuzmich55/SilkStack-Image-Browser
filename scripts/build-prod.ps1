@@ -1,4 +1,6 @@
 $ErrorActionPreference = "Stop"
+Set-Location -Path "C:\Projects\AI-Images-Browser\"
+
 Write-Host "Closing Running Application Instances..."
 Get-Process -Name "SilkStack Image Browser" -ErrorAction SilentlyContinue | Stop-Process -Force
 Get-Process -Name "ai-images-browser" -ErrorAction SilentlyContinue | Stop-Process -Force
