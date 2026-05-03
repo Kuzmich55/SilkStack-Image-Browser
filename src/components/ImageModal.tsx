@@ -12,7 +12,6 @@ import {
   Star,
   X,
   Zap,
-  ArrowUp,
   Play,
   Pause,
   Volume2,
@@ -46,7 +45,6 @@ interface ImageModalProps {
   previousImage?: IndexedImage | null;
   onTagAdded?: (imageId: string, tag: string) => void;
   onTagRemoved?: (imageId: string, tag: string) => void;
-  onAutoTagRemoved?: (imageId: string, tag: string) => void;
   onFavoriteToggled?: (imageId: string) => void;
   isStandaloneWindow?: boolean;
 }
@@ -457,7 +455,6 @@ const ImageModal: React.FC<ImageModalProps> = ({
   previousImage,
   onTagAdded,
   onTagRemoved,
-  onAutoTagRemoved,
   onFavoriteToggled,
   isStandaloneWindow = false,
 }) => {
@@ -721,9 +718,6 @@ const ImageModal: React.FC<ImageModalProps> = ({
   const toggleFavorite = useImageStore((state) => state.toggleFavorite);
   const addTagToImage = useImageStore((state) => state.addTagToImage);
   const removeTagFromImage = useImageStore((state) => state.removeTagFromImage);
-  const removeAutoTagFromImage = useImageStore(
-    (state) => state.removeAutoTagFromImage,
-  );
   const availableTags = useImageStore((state) => state.availableTags);
 
 
@@ -732,7 +726,6 @@ const ImageModal: React.FC<ImageModalProps> = ({
   // imageFromStore, isVideo, and preferredThumbnailUrl are defined above
 
   const currentTags = imageFromStore?.tags || image.tags || [];
-  const currentAutoTags = imageFromStore?.autoTags || image.autoTags || [];
   const currentIsFavorite =
     imageFromStore?.isFavorite ?? image.isFavorite ?? false;
 
@@ -1213,29 +1206,6 @@ const ImageModal: React.FC<ImageModalProps> = ({
     }
   };
 
-  const handleRemoveAutoTag = (tag: string) => {
-    if (onAutoTagRemoved) {
-      onAutoTagRemoved(image.id, tag);
-    } else {
-      removeAutoTagFromImage(image.id, tag);
-    }
-  };
-
-  const handlePromoteAutoTag = async (tag: string) => {
-    // Add as manual tag and remove from auto-tags
-    if (onTagAdded) {
-      onTagAdded(image.id, tag);
-    } else {
-      await addTagToImage(image.id, tag);
-    }
-
-    if (onAutoTagRemoved) {
-      onAutoTagRemoved(image.id, tag);
-    } else {
-      removeAutoTagFromImage(image.id, tag);
-    }
-  };
-
   const handleToggleFavorite = () => {
     if (onFavoriteToggled) {
       onFavoriteToggled(image.id);
@@ -1650,38 +1620,6 @@ const ImageModal: React.FC<ImageModalProps> = ({
                   </div>
                 )}
 
-
-                {currentAutoTags && currentAutoTags.length > 0 && (
-                  <div className="space-y-1">
-                    <p className="text-[10px] uppercase tracking-wider text-purple-300">
-                      Auto tags
-                    </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {currentAutoTags.map((tag) => (
-                        <div
-                          key={`auto-${tag}`}
-                          className="inline-flex items-center bg-purple-600/20 border border-purple-500/40 rounded-full overflow-hidden"
-                        >
-                          <button
-                            onClick={() => handlePromoteAutoTag(tag)}
-                            className="px-2 py-0.5 text-purple-300 hover:bg-blue-600/30 hover:text-blue-200 transition-all"
-                            title="Promote to manual tag"
-                          >
-                            <ArrowUp size={12} />
-                          </button>
-                          <span className="text-purple-300 text-xs">{tag}</span>
-                          <button
-                            onClick={() => handleRemoveAutoTag(tag)}
-                            className="px-2 py-0.5 text-purple-300 hover:bg-red-600/30 hover:text-red-200 transition-all"
-                            title="Remove auto-tag"
-                          >
-                            <X size={12} />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
           </div>

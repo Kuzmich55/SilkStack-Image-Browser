@@ -110,11 +110,9 @@ const buildCatalogSearchText = (image: IndexedImage): string => {
     const name = (image.name || '').toLowerCase();
     const directory = (image.directoryName || '').replace(/\\/g, '/').toLowerCase();
     
-    // Add user tags and auto-tags to searchable text
     const tags = (image.tags || []).join(' ').toLowerCase();
-    const autoTags = (image.autoTags || []).join(' ').toLowerCase();
-    
-    return [name, relativePath, directory, tags, autoTags].filter(Boolean).join(' ');
+
+    return [name, relativePath, directory, tags].filter(Boolean).join(' ');
 };
 
 const buildEnrichedSearchText = (image: IndexedImage): string => {
@@ -208,10 +206,8 @@ interface ImageState {
   // Annotations State
   annotations: Map<string, ImageAnnotations>;
   availableTags: TagInfo[];
-  availableAutoTags: TagInfo[]; // Top auto-tags by frequency
   recentTags: string[];
   selectedTags: string[];
-  selectedAutoTags: string[]; // Filter by auto-tags
   showFavoritesOnly: boolean;
   selectionFavoriteCount: number;
   isAnnotationsLoaded: boolean;
@@ -321,15 +317,12 @@ interface ImageState {
   bulkToggleFavorite: (imageIds: string[], isFavorite: boolean) => Promise<void>;
   addTagToImage: (imageId: string, tag: string) => Promise<void>;
   removeTagFromImage: (imageId: string, tag: string) => Promise<void>;
-  removeAutoTagFromImage: (imageId: string, tag: string) => void;
   bulkAddTag: (imageIds: string[], tag: string) => Promise<void>;
   bulkRemoveTag: (imageIds: string[], tag: string) => Promise<void>;
   setSelectedTags: (tags: string[]) => void;
-  setSelectedAutoTags: (tags: string[]) => void;
   setShowFavoritesOnly: (show: boolean) => void;
   getImageAnnotations: (imageId: string) => ImageAnnotations | null;
   refreshAvailableTags: () => Promise<void>;
-  refreshAvailableAutoTags: () => void;
   importMetadataTags: (images: IndexedImage[]) => Promise<void>;
   flushPendingImages: () => void;
   setDirectoryRefreshing: (directoryId: string, isRefreshing: boolean) => void;
@@ -571,7 +564,7 @@ export const useImageStore = create<ImageState>((set, get) => {
         if (state.searchQuery) return true;
         if (state.showFavoritesOnly) return true;
         if (state.selectedTags?.length) return true;
-        if (state.selectedAutoTags?.length) return true;
+
         if (state.selectedModels?.length || state.selectedLoras?.length || state.selectedSchedulers?.length) return true;
         if (state.advancedFilters && Object.keys(state.advancedFilters).length > 0) return true;
         if (state.selectedFolders && state.selectedFolders.size > 0) return true;
@@ -707,12 +700,11 @@ export const useImageStore = create<ImageState>((set, get) => {
     };
 
     // --- Helper for calculating available tags and favorites in a given image set ---
-    const calculateTagInfo = (images: IndexedImage[], type: 'tags' | 'autoTags', sortByCount = false): TagInfo[] => {
+    const calculateTagInfo = (images: IndexedImage[]): TagInfo[] => {
         const tagCounts = new Map<string, number>();
         for (const img of images) {
-            const tags = type === 'tags' ? img.tags : img.autoTags;
-            if (tags && tags.length > 0) {
-                for (const tag of tags) {
+            if (img.tags && img.tags.length > 0) {
+                for (const tag of img.tags) {
                     tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1);
                 }
             }
@@ -723,9 +715,6 @@ export const useImageStore = create<ImageState>((set, get) => {
             count,
         }));
 
-        if (sortByCount) {
-            return result.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-        }
         return result.sort((a, b) => a.name.localeCompare(b.name));
     };
 
@@ -795,8 +784,7 @@ export const useImageStore = create<ImageState>((set, get) => {
         });
 
         const selectionFavoriteCount = selectionFiltered.filter(img => img.isFavorite).length;
-        const availableTags = calculateTagInfo(selectionFiltered, 'tags');
-        const availableAutoTags = calculateTagInfo(selectionFiltered, 'autoTags', true);
+        const availableTags = calculateTagInfo(selectionFiltered);
 
         let results = selectionFiltered;
 
@@ -825,15 +813,6 @@ export const useImageStore = create<ImageState>((set, get) => {
                 if (!img.tags || img.tags.length === 0) return false;
                 // Match ANY selected tag (OR logic)
                 return state.selectedTags.some(tag => img.tags!.includes(tag));
-            });
-        }
-
-        // Step 5: Auto-tags filter
-        if (state.selectedAutoTags && state.selectedAutoTags.length > 0) {
-            results = results.filter(img => {
-                if (!img.autoTags || img.autoTags.length === 0) return false;
-                // Match ANY selected auto-tag (OR logic)
-                return state.selectedAutoTags.some(tag => img.autoTags!.includes(tag));
             });
         }
 
@@ -1029,7 +1008,6 @@ export const useImageStore = create<ImageState>((set, get) => {
             selectionDirectoryCount,
             selectionFavoriteCount,
             availableTags,
-            availableAutoTags,
         };
     };
 
@@ -1103,10 +1081,8 @@ export const useImageStore = create<ImageState>((set, get) => {
         // Annotations initial values
         annotations: new Map(),
         availableTags: [],
-        availableAutoTags: [],
         recentTags: loadRecentTags(),
         selectedTags: [],
-        selectedAutoTags: [],
         showFavoritesOnly: false,
         isAnnotationsLoaded: false,
         activeWatchers: new Set(),
@@ -1916,24 +1892,48 @@ export const useImageStore = create<ImageState>((set, get) => {
                             tagMap.set(id, normalizedTags);
                         });
 
+                        // Add generated tags as standard annotations
+                        const { annotations } = get();
+                        const updatedAnnotations: ImageAnnotations[] = [];
+
+                        for (const [imageId, newTags] of tagMap) {
+                            const current = annotations.get(imageId);
+                            const existingTags = current?.tags ?? [];
+                            const mergedTags = [...new Set([...existingTags, ...newTags])];
+                            if (mergedTags.length === existingTags.length) continue;
+
+                            updatedAnnotations.push({
+                                imageId,
+                                isFavorite: current?.isFavorite ?? false,
+                                tags: mergedTags,
+                                addedAt: current?.addedAt ?? generatedAt,
+                                updatedAt: generatedAt,
+                            });
+                        }
+
+                        // Persist annotations
+                        if (updatedAnnotations.length > 0) {
+                            import('../services/imageAnnotationsStorage')
+                                .then(({ bulkSaveAnnotations }) => bulkSaveAnnotations(updatedAnnotations))
+                                .catch(error => console.warn('Failed to persist auto-tags as annotations:', error));
+                        }
+
                         set(state => {
+                            const newAnnotations = new Map(state.annotations);
+                            for (const annotation of updatedAnnotations) {
+                                newAnnotations.set(annotation.imageId, annotation);
+                            }
+
                             const updateList = (list: IndexedImage[]) => list.map(img => {
-                                if (!tagMap.has(img.id)) {
-                                    return img;
-                                }
-                                const tags = tagMap.get(img.id) ?? [];
-                                return {
-                                    ...img,
-                                    autoTags: tags,
-                                    autoTagsGeneratedAt: generatedAt,
-                                };
+                                const annotation = newAnnotations.get(img.id);
+                                return annotation ? { ...img, tags: annotation.tags } : img;
                             });
 
                             return {
                                 ...state,
+                                annotations: newAnnotations,
                                 images: updateList(state.images),
                                 filteredImages: updateList(state.filteredImages),
-
                                 autoTaggingProgress: null,
                                 isAutoTagging: false,
                             };
@@ -1941,7 +1941,7 @@ export const useImageStore = create<ImageState>((set, get) => {
 
                         worker.terminate();
                         set({ autoTaggingWorker: null });
-                        console.log(`Auto-tagging complete: ${Object.keys(payload.autoTags || {}).length} images tagged`);
+                        console.log(`Auto-tagging complete: ${tagMap.size} images tagged`);
 
                         if (payload.autoTags) {
                             import('../services/clusterCacheManager')
@@ -2012,33 +2012,96 @@ export const useImageStore = create<ImageState>((set, get) => {
                     }
                 }
 
-                // Restore auto-tags (only if images don't already have them)
-                const { images } = get();
-                const hasAutoTags = images.some(img => img.autoTags && img.autoTags.length > 0);
-                if (!hasAutoTags) {
-                    const autoTagCache = await loadAutoTagCache(directoryPath, scanSubfolders);
-                    if (autoTagCache?.autoTags && Object.keys(autoTagCache.autoTags).length > 0) {
-                        const tagMap = new Map<string, string[]>();
-                        for (const [id, tags] of Object.entries(autoTagCache.autoTags)) {
-                            const normalizedTags = (tags as any[] || []).map((t: any) => t.tag).filter(Boolean);
-                            tagMap.set(id, normalizedTags);
+                // Restore auto-tags and merge into standard annotations
+                const { images, annotations } = get();
+
+                // Migrate any existing autoTags from images (from prior version) into annotations
+                const migrationAnnotations: ImageAnnotations[] = [];
+                for (const img of images) {
+                    if ((img as any).autoTags && (img as any).autoTags.length > 0) {
+                        const current = annotations.get(img.id);
+                        const existingTags = current?.tags ?? [];
+                        const newTags = (img as any).autoTags.filter((t: string) => !existingTags.includes(t));
+                        if (newTags.length > 0) {
+                            migrationAnnotations.push({
+                                imageId: img.id,
+                                isFavorite: current?.isFavorite ?? false,
+                                tags: [...existingTags, ...newTags],
+                                addedAt: current?.addedAt ?? Date.now(),
+                                updatedAt: Date.now(),
+                            });
                         }
+                    }
+                }
+                if (migrationAnnotations.length > 0) {
+                    const { bulkSaveAnnotations } = await import('../services/imageAnnotationsStorage');
+                    await bulkSaveAnnotations(migrationAnnotations);
+                }
 
+                const autoTagCache = await loadAutoTagCache(directoryPath, scanSubfolders);
+                if (autoTagCache?.autoTags && Object.keys(autoTagCache.autoTags).length > 0) {
+                    const tagMap = new Map<string, string[]>();
+                    for (const [id, tags] of Object.entries(autoTagCache.autoTags)) {
+                        const normalizedTags = (tags as any[] || []).map((t: any) => t.tag).filter(Boolean);
+                        tagMap.set(id, normalizedTags);
+                    }
 
+                    // Merge cached tags into annotations (skip if already present)
+                    const cacheAnnotations: ImageAnnotations[] = [];
+                    const currentAnnotations = get().annotations;
+                    for (const [imageId, newTags] of tagMap) {
+                        const current = currentAnnotations.get(imageId);
+                        const existingTags = current?.tags ?? [];
+                        const tagsToAdd = newTags.filter(t => !existingTags.includes(t));
+                        if (tagsToAdd.length > 0) {
+                            cacheAnnotations.push({
+                                imageId,
+                                isFavorite: current?.isFavorite ?? false,
+                                tags: [...existingTags, ...tagsToAdd],
+                                addedAt: current?.addedAt ?? autoTagCache.lastGenerated ?? Date.now(),
+                                updatedAt: Date.now(),
+                            });
+                        }
+                    }
+
+                    if (cacheAnnotations.length > 0) {
+                        const { bulkSaveAnnotations } = await import('../services/imageAnnotationsStorage');
+                        await bulkSaveAnnotations(cacheAnnotations);
 
                         set(state => {
+                            const newAnnotations = new Map(state.annotations);
+                            for (const annotation of cacheAnnotations) {
+                                newAnnotations.set(annotation.imageId, annotation);
+                            }
                             const newImages = state.images.map(img => {
-                                if (!tagMap.has(img.id)) return img;
-                                const tags = tagMap.get(img.id) ?? [];
-                                return { ...img, autoTags: tags, autoTagsGeneratedAt: autoTagCache.lastGenerated };
+                                const annotation = newAnnotations.get(img.id);
+                                // Strip autoTags from legacy data
+                                const { autoTags, autoTagsGeneratedAt, ...rest } = img as any;
+                                return annotation ? { ...rest, tags: annotation.tags } : rest;
                             });
-
-                            return _updateState({
-                                ...state,
-
-                            }, newImages);
+                            return _updateState({ ...state, annotations: newAnnotations }, newImages);
                         });
-                        console.log(`Restored auto-tags for ${tagMap.size} images from cache`);
+                    } else {
+                        // Still strip legacy autoTags from images even if no new tags to add
+                        set(state => {
+                            const newImages = state.images.map(img => {
+                                const { autoTags, autoTagsGeneratedAt, ...rest } = img as any;
+                                return rest;
+                            });
+                            return _updateState({ ...state }, newImages);
+                        });
+                    }
+                    console.log(`Restored auto-tags for ${tagMap.size} images from cache as standard tags`);
+                } else {
+                    // No cache, but still strip legacy autoTags from images
+                    if (migrationAnnotations.length > 0 || images.some(img => (img as any).autoTags)) {
+                        set(state => {
+                            const newImages = state.images.map(img => {
+                                const { autoTags, autoTagsGeneratedAt, ...rest } = img as any;
+                                return rest;
+                            });
+                            return _updateState({ ...state }, newImages);
+                        });
                     }
                 }
             } catch (error) {
@@ -2250,27 +2313,6 @@ export const useImageStore = create<ImageState>((set, get) => {
             }
         },
 
-        removeAutoTagFromImage: (imageId, tag) => {
-            set(state => {
-                const updatedImages = state.images.map(img => {
-                    if (img.id === imageId && img.autoTags) {
-                        return {
-                            ...img,
-                            autoTags: img.autoTags.filter(t => t !== tag),
-                        };
-                    }
-                    return img;
-                });
-
-                const newState = {
-                    ...state,
-                    images: updatedImages,
-                };
-
-                return { ...newState, ...filterAndSort(newState) };
-            });
-        },
-
         bulkAddTag: async (imageIds, tag) => {
             const normalizedTag = tag.trim().toLowerCase();
             if (!normalizedTag || imageIds.length === 0) return;
@@ -2400,15 +2442,6 @@ export const useImageStore = create<ImageState>((set, get) => {
             // Now handled automatically by filterAndSort
             // We just need to trigger a recompute if somehow the tags changed but no other state did
             set(state => ({ ...filterAndSort(state) }));
-        },
-
-        refreshAvailableAutoTags: () => {
-            // Now handled automatically by filterAndSort
-            set(state => ({ ...filterAndSort(state) }));
-        },
-
-        setSelectedAutoTags: (tags) => {
-            set(state => ({ ...filterAndSort({ ...state, selectedAutoTags: tags }), selectedAutoTags: tags }));
         },
 
         importMetadataTags: async (images) => {
@@ -2592,11 +2625,9 @@ export const useImageStore = create<ImageState>((set, get) => {
             isFullscreenMode: false,
             annotations: new Map(),
             availableTags: [],
-            availableAutoTags: [],
             selectionFavoriteCount: 0,
             recentTags: loadRecentTags(),
             selectedTags: [],
-            selectedAutoTags: [],
             showFavoritesOnly: false,
             isAnnotationsLoaded: false,
             activeWatchers: new Set(),

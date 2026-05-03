@@ -173,16 +173,6 @@ const ImageModalWindow: React.FC = () => {
     }
   }, []);
 
-  const handleRemoveAutoTag = useCallback((imageId: string, tag: string) => {
-    if (window.electronAPI?.imageViewerAction) {
-      window.electronAPI.imageViewerAction({
-        type: "removeAutoTag",
-        imageId,
-        tag,
-      });
-    }
-  }, []);
-
   const handleToggleFavorite = useCallback((imageId: string) => {
     if (window.electronAPI?.imageViewerAction) {
       window.electronAPI.imageViewerAction({
@@ -221,7 +211,6 @@ const ImageModalWindow: React.FC = () => {
         previousImage={previousImage}
         onTagAdded={handleAddTag}
         onTagRemoved={handleRemoveTag}
-        onAutoTagRemoved={handleRemoveAutoTag}
         onFavoriteToggled={handleToggleFavorite}
         isStandaloneWindow={true}
       />

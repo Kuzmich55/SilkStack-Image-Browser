@@ -1554,8 +1554,6 @@ function mapIndexedImageToCache(image: IndexedImage): CacheImageMetadata {
     fileType: image.fileType,
     clusterId: image.clusterId,
     clusterPosition: image.clusterPosition,
-    autoTags: image.autoTags,
-    autoTagsGeneratedAt: image.autoTagsGeneratedAt,
   };
 }
 

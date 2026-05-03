@@ -121,8 +121,6 @@ export default function App() {
   const toggleFavorite = useImageStore((state) => state.toggleFavorite);
   const addTagToImage = useImageStore((state) => state.addTagToImage);
   const removeTagFromImage = useImageStore((state) => state.removeTagFromImage);
-  const removeAutoTagFromImage = useImageStore((state) => state.removeAutoTagFromImage);
-
   const isElectron = typeof window !== 'undefined' && !!window.electronAPI;
 
 
@@ -689,11 +687,6 @@ export default function App() {
             await removeTagFromImage(action.imageId, action.tag);
           }
           break;
-        case 'removeAutoTag':
-          if (action.tag) {
-            await removeAutoTagFromImage(action.imageId, action.tag);
-          }
-          break;
       }
 
       // If the image was updated (not deleted), broadcast the new state back to viewers
@@ -709,7 +702,7 @@ export default function App() {
     });
 
     return () => unsubscribe();
-  }, [handleImageDeleted, handleImageRenamed, toggleFavorite, addTagToImage, removeTagFromImage, removeAutoTagFromImage, updateImage, sendImageToViewer]);
+  }, [handleImageDeleted, handleImageRenamed, toggleFavorite, addTagToImage, removeTagFromImage, updateImage, sendImageToViewer]);
 
   // Listen for viewer window closed — only reset selectedImage when all viewer windows are gone
   useEffect(() => {

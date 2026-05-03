@@ -274,7 +274,7 @@ export interface ElectronAPI {
   }) => Promise<{ success: boolean; windowId?: number; error?: string }>;
   imageViewerNavigate: (direction: 'next' | 'previous') => void;
   imageViewerAction: (action: {
-    type: 'delete' | 'rename' | 'toggleFavorite' | 'addTag' | 'removeTag' | 'removeAutoTag';
+    type: 'delete' | 'rename' | 'toggleFavorite' | 'addTag' | 'removeTag';
     imageId: string;
     newName?: string;
     tag?: string;
@@ -294,7 +294,7 @@ export interface ElectronAPI {
   ) => () => void;
   onImageViewerAction: (
     callback: (action: {
-      type: 'delete' | 'rename' | 'toggleFavorite' | 'addTag' | 'removeTag' | 'removeAutoTag';
+      type: 'delete' | 'rename' | 'toggleFavorite' | 'addTag' | 'removeTag';
       imageId: string;
       newName?: string;
       tag?: string;
@@ -947,11 +947,9 @@ export interface IndexedImage {
   isFavorite?: boolean; // Quick access to favorite status
   tags?: string[]; // Quick access to tags array
 
-  // Smart Clustering & Auto-Tagging (Phase 1)
+  // Smart Clustering (Phase 1)
   clusterId?: string; // Cluster this image belongs to
   clusterPosition?: number; // Position within cluster (0 = cover image)
-  autoTags?: string[]; // Auto-generated tags from TF-IDF
-  autoTagsGeneratedAt?: number; // Timestamp of tag generation
 }
 
 /**
@@ -1092,7 +1090,6 @@ export interface SmartCollection {
  */
 export interface SmartCollectionQuery {
   models?: string[];
-  autoTags?: string[];
   userTags?: string[];
   clusters?: string[];
   dateRange?: { from: number; to: number };
