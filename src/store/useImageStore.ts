@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { IndexedImage, Directory, ThumbnailStatus, ImageAnnotations, TagInfo, ImageCluster, TFIDFModel, AutoTag } from '../types';
+import { IndexedImage, Directory, ThumbnailStatus, ImageAnnotations, TagInfo, ImageCluster, AutoTag } from '../types';
 import { loadSelectedFolders, saveSelectedFolders, loadExcludedFolders, saveExcludedFolders } from '../services/folderSelectionStorage';
 import { loadFolderPreferences, saveFolderPreference, deleteFolderPreference, FolderPreference } from '../services/folderPreferencesStorage';
 import {
@@ -226,7 +226,7 @@ interface ImageState {
   clusterNavigationContext: IndexedImage[] | null; // Images from currently opened cluster for modal navigation
 
   // Auto-Tagging State (Phase 3)
-  tfidfModel: TFIDFModel | null;
+
   autoTaggingProgress: { current: number; total: number; message: string } | null;
   autoTaggingWorker: Worker | null;
   isAutoTagging: boolean;
@@ -1120,7 +1120,7 @@ export const useImageStore = create<ImageState>((set, get) => {
         clusterNavigationContext: null,
 
         // Auto-Tagging initial values (Phase 3)
-        tfidfModel: null,
+
         autoTaggingProgress: null,
         autoTaggingWorker: null,
         isAutoTagging: false,
@@ -1933,7 +1933,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                                 ...state,
                                 images: updateList(state.images),
                                 filteredImages: updateList(state.filteredImages),
-                                tfidfModel: payload.tfidfModel ?? null,
+
                                 autoTaggingProgress: null,
                                 isAutoTagging: false,
                             };
@@ -1943,9 +1943,9 @@ export const useImageStore = create<ImageState>((set, get) => {
                         set({ autoTaggingWorker: null });
                         console.log(`Auto-tagging complete: ${Object.keys(payload.autoTags || {}).length} images tagged`);
 
-                        if (payload.autoTags && payload.tfidfModel) {
+                        if (payload.autoTags) {
                             import('../services/clusterCacheManager')
-                                .then(({ saveAutoTagCache }) => saveAutoTagCache(directoryPath, scanSubfolders, payload.autoTags, payload.tfidfModel))
+                                .then(({ saveAutoTagCache }) => saveAutoTagCache(directoryPath, scanSubfolders, payload.autoTags))
                                 .catch(error => {
                                     console.warn('Failed to save auto-tag cache:', error);
                                 });
@@ -1999,7 +1999,7 @@ export const useImageStore = create<ImageState>((set, get) => {
 
         restoreSmartLibraryCache: async (directoryPath, scanSubfolders) => {
             try {
-                const { loadClusterCache, loadAutoTagCache, deserializeTFIDFModel } =
+                const { loadClusterCache, loadAutoTagCache } =
                     await import('../services/clusterCacheManager');
 
                 // Restore clusters (only if none exist yet)
@@ -2024,9 +2024,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                             tagMap.set(id, normalizedTags);
                         }
 
-                        const tfidfModel = autoTagCache.tfidfModel
-                            ? deserializeTFIDFModel(autoTagCache.tfidfModel)
-                            : null;
+
 
                         set(state => {
                             const newImages = state.images.map(img => {
@@ -2037,7 +2035,7 @@ export const useImageStore = create<ImageState>((set, get) => {
 
                             return _updateState({
                                 ...state,
-                                tfidfModel: tfidfModel ?? state.tfidfModel,
+
                             }, newImages);
                         });
                         console.log(`Restored auto-tags for ${tagMap.size} images from cache`);
@@ -2608,7 +2606,7 @@ export const useImageStore = create<ImageState>((set, get) => {
             clusteringWorker: null,
             isClustering: false,
             clusterNavigationContext: null,
-            tfidfModel: null,
+
             autoTaggingWorker: null,
             isAutoTagging: false,
             draggedItems: [],

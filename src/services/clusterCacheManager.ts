@@ -6,7 +6,7 @@
  * This avoids polluting user's image directories with metadata files
  */
 
-import { ImageCluster, AutoTag, TFIDFModel } from '../types';
+import { ImageCluster, AutoTag } from '../types';
 import { PARSER_VERSION } from './cacheManager';
 
 /**
@@ -30,18 +30,8 @@ export interface AutoTagCacheEntry {
   directoryPath: string;                // Original directory path
   scanSubfolders: boolean;              // Scan mode
   autoTags: Record<string, AutoTag[]>;  // imageId → tags
-  tfidfModel: TFIDFModelSerialized;     // Cached IDF scores (serialized)
   lastGenerated: number;                // Timestamp
   parserVersion: number;                // Track tagging version
-}
-
-/**
- * Serializable TF-IDF model (Map converted to object for JSON)
- */
-export interface TFIDFModelSerialized {
-  vocabulary: string[];
-  idfScores: Record<string, number>;    // Serialized Map
-  documentCount: number;
 }
 
 /**
@@ -253,8 +243,7 @@ export async function loadAutoTagCache(
 export async function saveAutoTagCache(
   directoryPath: string,
   scanSubfolders: boolean,
-  autoTags: Record<string, AutoTag[]>,
-  tfidfModel: TFIDFModel
+  autoTags: Record<string, AutoTag[]>
 ): Promise<void> {
   try {
     const cacheDir = await getCacheDirectory();
@@ -262,19 +251,11 @@ export async function saveAutoTagCache(
     const cachePath = `${cacheDir}/${idHash}-autotags.json`;
     const tempPath = `${cachePath}.tmp`;
 
-    // Serialize TF-IDF model (convert Map to object)
-    const serializedModel: TFIDFModelSerialized = {
-      vocabulary: tfidfModel.vocabulary,
-      idfScores: Object.fromEntries(tfidfModel.idfScores),
-      documentCount: tfidfModel.documentCount,
-    };
-
     const cacheEntry: AutoTagCacheEntry = {
       id: idHash,
       directoryPath,
       scanSubfolders,
       autoTags,
-      tfidfModel: serializedModel,
       lastGenerated: Date.now(),
       parserVersion: PARSER_VERSION,
     };
@@ -360,13 +341,3 @@ export async function invalidateAutoTagCache(
   }
 }
 
-/**
- * Deserialize TF-IDF model (convert object back to Map)
- */
-export function deserializeTFIDFModel(serialized: TFIDFModelSerialized): TFIDFModel {
-  return {
-    vocabulary: serialized.vocabulary,
-    idfScores: new Map(Object.entries(serialized.idfScores)),
-    documentCount: serialized.documentCount,
-  };
-}

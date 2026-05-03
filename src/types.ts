@@ -1064,12 +1064,12 @@ export interface ImageCluster {
 }
 
 /**
- * Auto-generated tag from TF-IDF analysis
+ * Auto-generated tag from LLM analysis
  */
 export interface AutoTag {
   tag: string; // Tag name (e.g., "cyberpunk")
-  tfidfScore: number; // TF-IDF score
-  frequency: number; // Term frequency across corpus
+  tfidfScore?: number; // Kept for backwards compatibility
+  frequency?: number; // Kept for backwards compatibility
   sourceType: "prompt" | "metadata"; // Origin of tag
 }
 
@@ -1117,14 +1117,6 @@ export interface StackViewState {
   scrubPosition: number; // 0-1 for hover preview
 }
 
-/**
- * TF-IDF model for auto-tagging
- */
-export interface TFIDFModel {
-  vocabulary: string[]; // All unique terms
-  idfScores: Map<string, number>; // Term → IDF score
-  documentCount: number; // Total documents processed
-}
 
 /**
  * Stack of images grouped by similar prompt

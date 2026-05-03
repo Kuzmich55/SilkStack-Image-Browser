@@ -49,7 +49,8 @@
     "react-window": "^1.8.10",
     "react-zoom-pan-pinch": "^3.6.1",
     "recharts": "^3.4.1",
-    "zustand": "^5.0.8"
+    "zustand": "^5.0.8",
+    "@ai-images-browser/ai-intelligence": "file:./ai-intelligence"
   },
   "devDependencies": {
     "@eslint/js": "^9.37.0",
