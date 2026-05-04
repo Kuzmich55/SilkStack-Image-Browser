@@ -1,6 +1,6 @@
 /// <reference lib="dom" />
 
-import { openDatabase, isPersistenceDisabled } from './folderSelectionStorage';
+import { openDatabase } from './indexedDb';
 
 const STORE_NAME = "folderPreferences";
 

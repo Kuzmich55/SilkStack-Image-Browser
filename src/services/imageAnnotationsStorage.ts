@@ -1,191 +1,17 @@
 /// <reference lib="dom" />
 
 import type { ImageAnnotations, TagInfo, ClusterPreference, SmartCollection } from '../types';
+import { openDatabase, getIsPersistenceDisabled } from './indexedDb';
 
-const DB_NAME = 'image-metahub-preferences';
-const DB_VERSION = 6; // v6: autoTags and metadataTags indexes
 const STORE_NAME = 'imageAnnotations';
 
 const inMemoryAnnotations: Map<string, ImageAnnotations> = new Map();
-let isPersistenceDisabled = false;
-let hasResetAttempted = false;
-
-const getIndexedDB = () => {
-  if (typeof indexedDB === 'undefined') {
-    if (!isPersistenceDisabled) {
-      console.warn('IndexedDB is not available in this environment. Image annotations persistence is disabled.');
-      isPersistenceDisabled = true;
-    }
-    return null;
-  }
-  return indexedDB;
-};
-
-function disablePersistence(error?: unknown) {
-  if (isPersistenceDisabled) {
-    return;
-  }
-
-  console.error(
-    'IndexedDB open error for image annotations storage. Annotations persistence will be disabled for this session.',
-    error,
-  );
-  isPersistenceDisabled = true;
-}
-
-async function deleteDatabase(): Promise<boolean> {
-  const idb = getIndexedDB();
-  if (!idb) {
-    return false;
-  }
-
-  const deleteResult = await new Promise<boolean>((resolve) => {
-    const request = idb.deleteDatabase(DB_NAME);
-
-    request.onsuccess = () => resolve(true);
-    request.onerror = () => {
-      console.error('Failed to reset image annotations storage', request.error);
-      resolve(false);
-    };
-    request.onblocked = () => {
-      console.warn('Image annotations storage reset is blocked by an open connection.');
-      resolve(false);
-    };
-  });
-
-  return deleteResult;
-}
-
-function getErrorName(error: unknown): string | undefined {
-  if (error instanceof DOMException) {
-    return error.name;
-  }
-
-  if (typeof error === 'object' && error && 'name' in error) {
-    return String((error as { name: unknown }).name);
-  }
-
-  return undefined;
-}
-
-async function openDatabase({ allowReset = true }: { allowReset?: boolean } = {}): Promise<IDBDatabase | null> {
-  if (isPersistenceDisabled) {
-    return null;
-  }
-
-  const idb = getIndexedDB();
-  if (!idb) {
-    return null;
-  }
-
-  try {
-    return await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = idb.open(DB_NAME, DB_VERSION);
-
-      request.onupgradeneeded = (event) => {
-        const db = request.result;
-        const oldVersion = event.oldVersion;
-
-        // Versão 1: Create folderSelection store (existing)
-        if (oldVersion < 1) {
-          if (!db.objectStoreNames.contains('folderSelection')) {
-            db.createObjectStore('folderSelection', { keyPath: 'id' });
-          }
-        }
-
-        // Versão 2: Create imageAnnotations store (existing)
-        if (oldVersion < 2) {
-          if (!db.objectStoreNames.contains(STORE_NAME)) {
-            const store = db.createObjectStore(STORE_NAME, { keyPath: 'imageId' });
-
-            // Index para buscar favoritas rapidamente
-            store.createIndex('isFavorite', 'isFavorite', { unique: false });
-
-            // Index para buscar por tag (multiEntry: true permite busca em array)
-            store.createIndex('tags', 'tags', { unique: false, multiEntry: true });
-          }
-        }
-
-        // Versão 3: Create Smart Clustering stores (Phase 1)
-        if (oldVersion < 3) {
-          // Cluster preferences store
-          if (!db.objectStoreNames.contains('clusterPreferences')) {
-            db.createObjectStore('clusterPreferences', { keyPath: 'clusterId' });
-            console.log('Created clusterPreferences object store (v3)');
-          }
-
-          // Smart collections store
-          if (!db.objectStoreNames.contains('smartCollections')) {
-            const collectionsStore = db.createObjectStore('smartCollections', { keyPath: 'id' });
-            collectionsStore.createIndex('type', 'type', { unique: false });
-            console.log('Created smartCollections object store (v3)');
-          }
-        }
-
-
-        // Versão 5: Create folderPreferences store
-        if (oldVersion < 5) {
-          if (!db.objectStoreNames.contains('folderPreferences')) {
-            db.createObjectStore('folderPreferences', { keyPath: 'path' });
-            console.log('Created folderPreferences object store (v5)');
-          }
-        }
-
-        // Versão 6: Add autoTags and metadataTags indexes
-        if (oldVersion < 6) {
-          const annotationStore = request.transaction.objectStore(STORE_NAME);
-          if (annotationStore) {
-            if (!annotationStore.indexNames.contains('autoTags')) {
-              annotationStore.createIndex('autoTags', 'autoTags', { unique: false, multiEntry: true });
-            }
-            if (!annotationStore.indexNames.contains('metadataTags')) {
-              annotationStore.createIndex('metadataTags', 'metadataTags', { unique: false, multiEntry: true });
-            }
-            console.log('Added autoTags and metadataTags indexes (v6)');
-          }
-        }
-      };
-
-      request.onsuccess = () => {
-        const db = request.result;
-        db.onversionchange = () => {
-          try {
-            db.close();
-          } catch (closeError) {
-            console.warn('Failed to close image annotations storage during version change', closeError);
-          }
-        };
-        hasResetAttempted = false;
-        resolve(db);
-      };
-
-      request.onerror = () => {
-        console.warn('Failed to open image annotations storage', request.error);
-        reject(request.error);
-      };
-    });
-  } catch (error) {
-    const errorName = getErrorName(error);
-
-    if (allowReset && !hasResetAttempted && (errorName === 'UnknownError' || errorName === 'InvalidStateError')) {
-      console.warn('Resetting image annotations storage due to IndexedDB error:', error);
-      hasResetAttempted = true;
-      const resetSuccessful = await deleteDatabase();
-      if (resetSuccessful) {
-        return openDatabase({ allowReset: false });
-      }
-    }
-
-    disablePersistence(error);
-    return null;
-  }
-}
 
 /**
  * Load all annotations from IndexedDB
  */
 export async function loadAllAnnotations(): Promise<Map<string, ImageAnnotations>> {
-  if (isPersistenceDisabled) {
+  if (getIsPersistenceDisabled()) {
     return new Map(inMemoryAnnotations);
   }
 
@@ -216,7 +42,6 @@ export async function loadAllAnnotations(): Promise<Map<string, ImageAnnotations
         const results = request.result as ImageAnnotations[];
         inMemoryAnnotations.clear();
         for (const annotation of results) {
-          // Normalize old records that lack autoTags/metadataTags
           if (!annotation.autoTags) annotation.autoTags = [];
           if (!annotation.metadataTags) annotation.metadataTags = [];
           inMemoryAnnotations.set(annotation.imageId, annotation);
@@ -230,26 +55,7 @@ export async function loadAllAnnotations(): Promise<Map<string, ImageAnnotations
       };
     });
   } catch (error) {
-    const errorName = getErrorName(error);
-
-    // If the object store doesn't exist, reset the database and retry once
-    if (errorName === 'NotFoundError' && !hasResetAttempted) {
-      console.warn('Image annotations store not found. Resetting database...', error);
-      try {
-        db.close();
-      } catch (closeError) {
-        console.warn('Failed to close database before reset', closeError);
-      }
-
-      hasResetAttempted = true;
-      const resetSuccessful = await deleteDatabase();
-      if (resetSuccessful) {
-        return loadAllAnnotations();
-      }
-    }
-
     console.error('Failed to load image annotations from IndexedDB:', error);
-    disablePersistence(error);
     return new Map(inMemoryAnnotations);
   }
 }
@@ -260,7 +66,7 @@ export async function loadAllAnnotations(): Promise<Map<string, ImageAnnotations
 export async function saveAnnotation(annotation: ImageAnnotations): Promise<void> {
   inMemoryAnnotations.set(annotation.imageId, annotation);
 
-  if (isPersistenceDisabled) {
+  if (getIsPersistenceDisabled()) {
     return;
   }
 
@@ -293,7 +99,6 @@ export async function saveAnnotation(annotation: ImageAnnotations): Promise<void
     };
   }).catch((error) => {
     console.error('IndexedDB save error for image annotation:', error);
-    disablePersistence(error);
   });
 }
 
@@ -303,7 +108,7 @@ export async function saveAnnotation(annotation: ImageAnnotations): Promise<void
 export async function deleteAnnotation(imageId: string): Promise<void> {
   inMemoryAnnotations.delete(imageId);
 
-  if (isPersistenceDisabled) {
+  if (getIsPersistenceDisabled()) {
     return;
   }
 
@@ -336,7 +141,6 @@ export async function deleteAnnotation(imageId: string): Promise<void> {
     };
   }).catch((error) => {
     console.error('IndexedDB delete error for image annotation:', error);
-    disablePersistence(error);
   });
 }
 
@@ -344,12 +148,11 @@ export async function deleteAnnotation(imageId: string): Promise<void> {
  * Bulk save multiple annotations in a single transaction (for performance)
  */
 export async function bulkSaveAnnotations(annotations: ImageAnnotations[]): Promise<void> {
-  // Update in-memory cache
   for (const annotation of annotations) {
     inMemoryAnnotations.set(annotation.imageId, annotation);
   }
 
-  if (isPersistenceDisabled) {
+  if (getIsPersistenceDisabled()) {
     return;
   }
 
@@ -384,13 +187,11 @@ export async function bulkSaveAnnotations(annotations: ImageAnnotations[]): Prom
       reject(transaction.error);
     };
 
-    // Add all puts to the transaction
     for (const annotation of annotations) {
       store.put(annotation);
     }
   }).catch((error) => {
     console.error('IndexedDB bulk save error for image annotations:', error);
-    disablePersistence(error);
   });
 }
 
@@ -398,12 +199,11 @@ export async function bulkSaveAnnotations(annotations: ImageAnnotations[]): Prom
  * Get a single annotation by imageId
  */
 export async function getAnnotation(imageId: string): Promise<ImageAnnotations | null> {
-  // First check in-memory cache
   if (inMemoryAnnotations.has(imageId)) {
     return inMemoryAnnotations.get(imageId) || null;
   }
 
-  if (isPersistenceDisabled) {
+  if (getIsPersistenceDisabled()) {
     return null;
   }
 
@@ -450,7 +250,7 @@ export async function getAnnotation(imageId: string): Promise<ImageAnnotations |
  * Get all image IDs that are marked as favorites
  */
 export async function getFavoriteImageIds(): Promise<string[]> {
-  if (isPersistenceDisabled) {
+  if (getIsPersistenceDisabled()) {
     return Array.from(inMemoryAnnotations.values())
       .filter(ann => ann.isFavorite)
       .map(ann => ann.imageId);
@@ -465,7 +265,7 @@ export async function getFavoriteImageIds(): Promise<string[]> {
     const transaction = db.transaction(STORE_NAME, 'readonly');
     const store = transaction.objectStore(STORE_NAME);
     const index = store.index('isFavorite');
-    const request = index.getAll(IDBKeyRange.only(true)); // Get all where isFavorite === true
+    const request = index.getAll(IDBKeyRange.only(true));
 
     const close = () => {
       try {
@@ -495,7 +295,7 @@ export async function getFavoriteImageIds(): Promise<string[]> {
  * Get all image IDs that have a specific tag
  */
 export async function getImageIdsByTag(tag: string): Promise<string[]> {
-  if (isPersistenceDisabled) {
+  if (getIsPersistenceDisabled()) {
     return Array.from(inMemoryAnnotations.values())
       .filter(ann =>
         ann.tags.includes(tag) ||
@@ -530,7 +330,6 @@ export async function getImageIdsByTag(tag: string): Promise<string[]> {
     transaction.onabort = close;
     transaction.onerror = close;
 
-    // Search across all three tag indexes
     const gatherResults = (indexName: string) => {
       if (store.indexNames.contains(indexName)) {
         const index = store.index(indexName);
@@ -574,7 +373,6 @@ export async function getAllTags(): Promise<TagInfo[]> {
     count,
   }));
 
-  // Sort alphabetically by default
   tags.sort((a, b) => a.name.localeCompare(b.name));
 
   return tags;
@@ -586,7 +384,7 @@ export async function getAllTags(): Promise<TagInfo[]> {
 export async function clearAllAnnotations(): Promise<void> {
   inMemoryAnnotations.clear();
 
-  if (isPersistenceDisabled) {
+  if (getIsPersistenceDisabled()) {
     return;
   }
 
@@ -619,15 +417,11 @@ export async function clearAllAnnotations(): Promise<void> {
     };
   }).catch((error) => {
     console.error('IndexedDB clear error for image annotations:', error);
-    disablePersistence(error);
   });
 }
 
-// ===== Cluster Preferences Functions (Phase 1) =====
+// ===== Cluster Preferences Functions =====
 
-/**
- * Get cluster preference by ID
- */
 export async function getClusterPreference(clusterId: string): Promise<ClusterPreference | null> {
   const db = await openDatabase();
   if (!db) return null;
@@ -645,9 +439,6 @@ export async function getClusterPreference(clusterId: string): Promise<ClusterPr
   });
 }
 
-/**
- * Save cluster preference
- */
 export async function saveClusterPreference(preference: ClusterPreference): Promise<void> {
   const db = await openDatabase();
   if (!db) return;
@@ -667,9 +458,6 @@ export async function saveClusterPreference(preference: ClusterPreference): Prom
   });
 }
 
-/**
- * Delete cluster preference
- */
 export async function deleteClusterPreference(clusterId: string): Promise<void> {
   const db = await openDatabase();
   if (!db) return;
@@ -687,9 +475,6 @@ export async function deleteClusterPreference(clusterId: string): Promise<void> 
   });
 }
 
-/**
- * Get all cluster preferences
- */
 export async function getAllClusterPreferences(): Promise<ClusterPreference[]> {
   const db = await openDatabase();
   if (!db) return [];
@@ -707,12 +492,8 @@ export async function getAllClusterPreferences(): Promise<ClusterPreference[]> {
   });
 }
 
+// ===== Smart Collections Functions =====
 
-// ===== Smart Collections Functions (Phase 1) =====
-
-/**
- * Get smart collection by ID
- */
 export async function getSmartCollection(id: string): Promise<SmartCollection | null> {
   const db = await openDatabase();
   if (!db) return null;
@@ -730,9 +511,6 @@ export async function getSmartCollection(id: string): Promise<SmartCollection | 
   });
 }
 
-/**
- * Save smart collection
- */
 export async function saveSmartCollection(collection: SmartCollection): Promise<void> {
   const db = await openDatabase();
   if (!db) return;
@@ -752,9 +530,6 @@ export async function saveSmartCollection(collection: SmartCollection): Promise<
   });
 }
 
-/**
- * Delete smart collection
- */
 export async function deleteSmartCollection(id: string): Promise<void> {
   const db = await openDatabase();
   if (!db) return;
@@ -772,9 +547,6 @@ export async function deleteSmartCollection(id: string): Promise<void> {
   });
 }
 
-/**
- * Get all smart collections
- */
 export async function getAllSmartCollections(): Promise<SmartCollection[]> {
   const db = await openDatabase();
   if (!db) return [];
@@ -792,9 +564,6 @@ export async function getAllSmartCollections(): Promise<SmartCollection[]> {
   });
 }
 
-/**
- * Get smart collections by type
- */
 export async function getSmartCollectionsByType(type: SmartCollection['type']): Promise<SmartCollection[]> {
   const db = await openDatabase();
   if (!db) return [];
@@ -812,5 +581,3 @@ export async function getSmartCollectionsByType(type: SmartCollection['type']): 
     };
   });
 }
-
-
