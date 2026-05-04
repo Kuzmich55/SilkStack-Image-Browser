@@ -76,11 +76,9 @@ export function startWatching(directoryId, dirPath, mainWindow) {
     });
 
     const enqueueImage = (imagePath, type = 'add', forceReindex = false) => {
-      sendWatcherDebug(mainWindow, `[FileWatcher] File ${type} detected: ${imagePath}`);
       if (!pendingFiles.has(directoryId)) {
         pendingFiles.set(directoryId, new Map());
       }
-      sendWatcherDebug(mainWindow, `[FileWatcher] Adding image (${type}) to batch: ${imagePath}`);
       const pendingMap = pendingFiles.get(directoryId);
       const existing = pendingMap.get(imagePath);
       pendingMap.set(imagePath, { 
