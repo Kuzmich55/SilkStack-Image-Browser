@@ -325,6 +325,7 @@ interface ImageState {
   setShowFavoritesOnly: (show: boolean) => void;
   getImageAnnotations: (imageId: string) => ImageAnnotations | null;
   refreshAvailableTags: () => Promise<void>;
+  clearAutoTags: () => Promise<void>;
   importMetadataTags: (images: IndexedImage[]) => Promise<void>;
   flushPendingImages: () => void;
   setDirectoryRefreshing: (directoryId: string, isRefreshing: boolean) => void;
@@ -2529,6 +2530,57 @@ export const useImageStore = create<ImageState>((set, get) => {
 
             // Refresh available tags
             get().refreshAvailableTags();
+        },
+
+        clearAutoTags: async () => {
+            const { annotations } = get();
+            const updatedAnnotations: ImageAnnotations[] = [];
+
+            for (const [, annotation] of annotations) {
+                if ((annotation.autoTags || []).length > 0) {
+                    updatedAnnotations.push({
+                        ...annotation,
+                        autoTags: [],
+                        updatedAt: Date.now(),
+                    });
+                }
+            }
+
+            if (updatedAnnotations.length === 0) return;
+
+            // Persist to IndexedDB
+            try {
+                await bulkSaveAnnotations(updatedAnnotations);
+            } catch (error) {
+                console.error('Failed to clear auto-tags:', error);
+            }
+
+            // Update in-memory state
+            set(state => {
+                const newAnnotations = new Map(state.annotations);
+                for (const annotation of updatedAnnotations) {
+                    newAnnotations.set(annotation.imageId, annotation);
+                }
+
+                const updatedImages = state.images.map(img => {
+                    const annotation = newAnnotations.get(img.id);
+                    if (annotation) {
+                        const mergedTags = mergeAnnotationTags(annotation);
+                        return { ...img, tags: mergedTags, autoTags: [], metadataTags: annotation.metadataTags };
+                    }
+                    return img;
+                });
+
+                const newState = {
+                    ...state,
+                    annotations: newAnnotations,
+                    images: updatedImages,
+                };
+
+                return { ...newState, ...filterAndSort(newState) };
+            });
+
+            console.log(`Cleared auto-tags from ${updatedAnnotations.length} images`);
         },
 
         flushPendingImages: () => {
