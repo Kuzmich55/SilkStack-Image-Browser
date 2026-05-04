@@ -1874,7 +1874,12 @@ export const useImageStore = create<ImageState>((set, get) => {
 
         // Auto-Tagging Actions (Phase 3)
         startAutoTagging: async (directoryPath, scanSubfolders, options) => {
-            const { images, autoTaggingWorker: existingWorker } = get();
+            const { filteredImages, autoTaggingWorker: existingWorker } = get();
+
+            if (filteredImages.length === 0) {
+                console.log('No images in current view to auto-tag');
+                return;
+            }
 
             if (existingWorker) {
                 existingWorker.terminate();
@@ -1888,7 +1893,7 @@ export const useImageStore = create<ImageState>((set, get) => {
             set({
                 autoTaggingWorker: worker,
                 isAutoTagging: true,
-                autoTaggingProgress: { current: 0, total: images.length, message: 'Initializing...' }
+                autoTaggingProgress: { current: 0, total: filteredImages.length, message: 'Initializing...' }
             });
 
             worker.onmessage = (e: MessageEvent) => {
@@ -1985,7 +1990,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                 }
             };
 
-            const taggingImages = images.map(img => ({
+            const taggingImages = filteredImages.map(img => ({
                 id: img.id,
                 prompt: img.prompt,
                 models: img.models,
@@ -2533,7 +2538,7 @@ export const useImageStore = create<ImageState>((set, get) => {
         },
 
         clearAutoTags: async () => {
-            const { annotations } = get();
+            const { annotations, directories } = get();
             const updatedAnnotations: ImageAnnotations[] = [];
 
             for (const [, annotation] of annotations) {
@@ -2551,46 +2556,64 @@ export const useImageStore = create<ImageState>((set, get) => {
                 }
             }
 
-            if (updatedAnnotations.length === 0) return;
-
-            // Persist to IndexedDB
-            try {
-                await bulkSaveAnnotations(updatedAnnotations);
-            } catch (error) {
-                console.error('Failed to clear auto-tags:', error);
-            }
-
-            // Update in-memory state — only replace what changed
-            set(state => {
-                const newAnnotations = new Map(state.annotations);
-                for (const annotation of updatedAnnotations) {
-                    newAnnotations.set(annotation.imageId, annotation);
+            if (updatedAnnotations.length === 0) {
+                // No auto-tags in annotations, but there may still be stale cache
+                // files on disk. Fall through to invalidate caches.
+            } else {
+                // Persist to IndexedDB
+                try {
+                    await bulkSaveAnnotations(updatedAnnotations);
+                } catch (error) {
+                    console.error('Failed to clear auto-tags:', error);
                 }
 
-                const changedIds = new Set(updatedAnnotations.map(a => a.imageId));
-                const updatedImages = state.images.map(img => {
-                    if (!changedIds.has(img.id)) return img;
-                    const annotation = newAnnotations.get(img.id);
-                    if (!annotation) return img;
-                    const mergedTags = mergeAnnotationTags(annotation);
+                // Update in-memory state — only replace what changed
+                set(state => {
+                    const newAnnotations = new Map(state.annotations);
+                    for (const annotation of updatedAnnotations) {
+                        newAnnotations.set(annotation.imageId, annotation);
+                    }
+
+                    const changedIds = new Set(updatedAnnotations.map(a => a.imageId));
+                    const updatedImages = state.images.map(img => {
+                        if (!changedIds.has(img.id)) return img;
+                        const annotation = newAnnotations.get(img.id);
+                        if (!annotation) return img;
+                        const mergedTags = mergeAnnotationTags(annotation);
+                        return {
+                            ...img,
+                            tags: mergedTags,
+                            autoTags: [],
+                            metadataTags: annotation.metadataTags,
+                        };
+                    });
+
                     return {
-                        ...img,
-                        tags: mergedTags,
-                        autoTags: [],
-                        metadataTags: annotation.metadataTags,
+                        annotations: newAnnotations,
+                        images: updatedImages,
                     };
                 });
 
-                return {
-                    annotations: newAnnotations,
-                    images: updatedImages,
-                };
-            });
+                // Re-run filter/sort to refresh availableTags etc.
+                set(state => filterAndSort(state));
 
-            // Re-run filter/sort to refresh availableTags etc.
-            set(state => filterAndSort(state));
+                console.log(`Cleared auto-tags from ${updatedAnnotations.length} images`);
+            }
 
-            console.log(`Cleared auto-tags from ${updatedAnnotations.length} images`);
+            // Invalidate on-disk auto-tag cache for all directories so
+            // restoreSmartLibraryCache doesn't re-apply stale auto-tags.
+            try {
+                const { invalidateAutoTagCache } = await import('../services/clusterCacheManager');
+                for (const dir of directories) {
+                    // Invalidate both scanSubfolders variants — the cache key
+                    // includes this flag, and a user may have changed the setting
+                    // since the cache was written.
+                    await invalidateAutoTagCache(dir.path, false, 'user_cleared');
+                    await invalidateAutoTagCache(dir.path, true, 'user_cleared');
+                }
+            } catch (error) {
+                console.error('Failed to invalidate auto-tag cache files:', error);
+            }
         },
 
         flushPendingImages: () => {
