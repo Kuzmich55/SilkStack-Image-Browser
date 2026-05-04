@@ -726,8 +726,16 @@ const ImageModal: React.FC<ImageModalProps> = ({
   // imageFromStore, isVideo, and preferredThumbnailUrl are defined above
 
   const currentTags = imageFromStore?.tags || image.tags || [];
+  const currentAutoTags = imageFromStore?.autoTags || image.autoTags || [];
+  const currentMetadataTags = imageFromStore?.metadataTags || image.metadataTags || [];
   const currentIsFavorite =
     imageFromStore?.isFavorite ?? image.isFavorite ?? false;
+
+  const getTagSource = (tag: string): 'manual' | 'auto' | 'metadata' => {
+    if (currentMetadataTags.includes(tag)) return 'metadata';
+    if (currentAutoTags.includes(tag)) return 'auto';
+    return 'manual';
+  };
 
 
   // State for tag input
@@ -1606,17 +1614,25 @@ const ImageModal: React.FC<ImageModalProps> = ({
                 {/* Current Tags */}
                 {currentTags && currentTags.length > 0 && (
                   <div className="flex flex-wrap gap-1.5">
-                    {currentTags.map((tag) => (
-                      <button
-                        key={tag}
-                        onClick={() => handleRemoveTag(tag)}
-                        className="flex items-center gap-1 bg-blue-600/20 border border-blue-500/50 text-blue-300 px-2 py-0.5 rounded-full text-xs hover:bg-red-600/20 hover:border-red-500/50 hover:text-red-300 transition-all"
-                        title="Click to remove"
-                      >
-                        {tag}
-                        <X size={12} />
-                      </button>
-                    ))}
+                    {currentTags.map((tag) => {
+                      const source = getTagSource(tag);
+                      const colors = source === 'auto'
+                        ? 'bg-cyan-600/20 border border-cyan-500/50 text-cyan-300'
+                        : source === 'metadata'
+                        ? 'bg-emerald-600/20 border border-emerald-500/50 text-emerald-300'
+                        : 'bg-blue-600/20 border border-blue-500/50 text-blue-300';
+                      return (
+                        <button
+                          key={tag}
+                          onClick={() => handleRemoveTag(tag)}
+                          className={`flex items-center gap-1 ${colors} px-2 py-0.5 rounded-full text-xs hover:bg-red-600/20 hover:border-red-500/50 hover:text-red-300 transition-all`}
+                          title={`${tag} (${source}) — Click to remove`}
+                        >
+                          {tag}
+                          <X size={12} />
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
 

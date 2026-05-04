@@ -945,7 +945,9 @@ export interface IndexedImage {
 
   // User Annotations (loaded from ImageAnnotations table)
   isFavorite?: boolean; // Quick access to favorite status
-  tags?: string[]; // Quick access to tags array
+  tags?: string[]; // All tags merged (manual + auto + metadata) for unified display
+  autoTags?: string[]; // Auto-generated tags from LLM analysis
+  metadataTags?: string[]; // Tags imported from image file metadata
 
   // Smart Clustering (Phase 1)
   clusterId?: string; // Cluster this image belongs to
@@ -959,7 +961,9 @@ export interface IndexedImage {
 export interface ImageAnnotations {
   imageId: string; // Links to IndexedImage.id (unique)
   isFavorite: boolean; // Star/Favorite flag
-  tags: string[]; // User-defined tags (lowercase normalized)
+  tags: string[]; // Manually-added tags (lowercase normalized)
+  autoTags: string[]; // Auto-generated tags from LLM analysis
+  metadataTags: string[]; // Tags imported from image file metadata
   addedAt: number; // Timestamp when first annotated
   updatedAt: number; // Timestamp of last update
 }

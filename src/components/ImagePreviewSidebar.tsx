@@ -387,17 +387,27 @@ const ImagePreviewSidebar: React.FC = () => {
               {/* Current Tags */}
               {activeImage.tags && activeImage.tags.length > 0 && (
                 <div className="flex flex-wrap gap-1.5">
-                  {activeImage.tags.map(tag => (
-                    <button
-                      key={tag}
-                      onClick={() => handleRemoveTag(tag)}
-                      className="flex items-center gap-1 bg-blue-600/20 border border-blue-500/50 text-blue-300 px-2 py-0.5 rounded-full text-xs hover:bg-red-600/20 hover:border-red-500/50 hover:text-red-300 transition-all"
-                      title="Click to remove"
-                    >
-                      {tag}
-                      <X size={12} />
-                    </button>
-                  ))}
+                  {activeImage.tags.map(tag => {
+                    const isAuto = (activeImage.autoTags || []).includes(tag);
+                    const isMetadata = (activeImage.metadataTags || []).includes(tag);
+                    const colors = isAuto
+                      ? 'bg-cyan-600/20 border border-cyan-500/50 text-cyan-300'
+                      : isMetadata
+                      ? 'bg-emerald-600/20 border border-emerald-500/50 text-emerald-300'
+                      : 'bg-blue-600/20 border border-blue-500/50 text-blue-300';
+                    const source = isAuto ? 'auto' : isMetadata ? 'metadata' : 'manual';
+                    return (
+                      <button
+                        key={tag}
+                        onClick={() => handleRemoveTag(tag)}
+                        className={`flex items-center gap-1 ${colors} px-2 py-0.5 rounded-full text-xs hover:bg-red-600/20 hover:border-red-500/50 hover:text-red-300 transition-all`}
+                        title={`${tag} (${source}) — Click to remove`}
+                      >
+                        {tag}
+                        <X size={12} />
+                      </button>
+                    );
+                  })}
                 </div>
               )}
 

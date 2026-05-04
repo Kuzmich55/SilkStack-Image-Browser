@@ -3,7 +3,7 @@
 import type { ImageAnnotations, TagInfo, ClusterPreference, SmartCollection } from '../types';
 
 const DB_NAME = 'image-metahub-preferences';
-const DB_VERSION = 5; // Increment to 5 for folderPreferences store
+const DB_VERSION = 6; // v6: autoTags and metadataTags indexes
 const STORE_NAME = 'imageAnnotations';
 
 const inMemoryAnnotations: Map<string, ImageAnnotations> = new Map();
@@ -130,6 +130,20 @@ async function openDatabase({ allowReset = true }: { allowReset?: boolean } = {}
             console.log('Created folderPreferences object store (v5)');
           }
         }
+
+        // Versão 6: Add autoTags and metadataTags indexes
+        if (oldVersion < 6) {
+          const annotationStore = request.transaction.objectStore(STORE_NAME);
+          if (annotationStore) {
+            if (!annotationStore.indexNames.contains('autoTags')) {
+              annotationStore.createIndex('autoTags', 'autoTags', { unique: false, multiEntry: true });
+            }
+            if (!annotationStore.indexNames.contains('metadataTags')) {
+              annotationStore.createIndex('metadataTags', 'metadataTags', { unique: false, multiEntry: true });
+            }
+            console.log('Added autoTags and metadataTags indexes (v6)');
+          }
+        }
       };
 
       request.onsuccess = () => {
@@ -202,6 +216,9 @@ export async function loadAllAnnotations(): Promise<Map<string, ImageAnnotations
         const results = request.result as ImageAnnotations[];
         inMemoryAnnotations.clear();
         for (const annotation of results) {
+          // Normalize old records that lack autoTags/metadataTags
+          if (!annotation.autoTags) annotation.autoTags = [];
+          if (!annotation.metadataTags) annotation.metadataTags = [];
           inMemoryAnnotations.set(annotation.imageId, annotation);
         }
         resolve(new Map(inMemoryAnnotations));
@@ -480,7 +497,11 @@ export async function getFavoriteImageIds(): Promise<string[]> {
 export async function getImageIdsByTag(tag: string): Promise<string[]> {
   if (isPersistenceDisabled) {
     return Array.from(inMemoryAnnotations.values())
-      .filter(ann => ann.tags.includes(tag))
+      .filter(ann =>
+        ann.tags.includes(tag) ||
+        (ann.autoTags || []).includes(tag) ||
+        (ann.metadataTags || []).includes(tag)
+      )
       .map(ann => ann.imageId);
   }
 
@@ -492,8 +513,7 @@ export async function getImageIdsByTag(tag: string): Promise<string[]> {
   return new Promise((resolve) => {
     const transaction = db.transaction(STORE_NAME, 'readonly');
     const store = transaction.objectStore(STORE_NAME);
-    const index = store.index('tags');
-    const request = index.getAll(tag); // Get all with this tag (multiEntry index)
+    const allIds = new Set<string>();
 
     const close = () => {
       try {
@@ -503,19 +523,30 @@ export async function getImageIdsByTag(tag: string): Promise<string[]> {
       }
     };
 
-    transaction.oncomplete = close;
+    transaction.oncomplete = () => {
+      close();
+      resolve(Array.from(allIds));
+    };
     transaction.onabort = close;
     transaction.onerror = close;
 
-    request.onsuccess = () => {
-      const results = request.result as ImageAnnotations[];
-      resolve(results.map(ann => ann.imageId));
+    // Search across all three tag indexes
+    const gatherResults = (indexName: string) => {
+      if (store.indexNames.contains(indexName)) {
+        const index = store.index(indexName);
+        const request = index.getAll(tag);
+        request.onsuccess = () => {
+          const results = request.result as ImageAnnotations[];
+          for (const ann of results) {
+            allIds.add(ann.imageId);
+          }
+        };
+      }
     };
 
-    request.onerror = () => {
-      console.error('Failed to query image IDs by tag', request.error);
-      resolve([]);
-    };
+    gatherResults('tags');
+    gatherResults('autoTags');
+    gatherResults('metadataTags');
   });
 }
 
@@ -528,7 +559,12 @@ export async function getAllTags(): Promise<TagInfo[]> {
   const tagCounts = new Map<string, number>();
 
   for (const annotation of annotations.values()) {
-    for (const tag of annotation.tags) {
+    const allTags = [
+      ...(annotation.tags || []),
+      ...(annotation.autoTags || []),
+      ...(annotation.metadataTags || []),
+    ];
+    for (const tag of allTags) {
       tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1);
     }
   }

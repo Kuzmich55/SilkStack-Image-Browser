@@ -111,8 +111,10 @@ const buildCatalogSearchText = (image: IndexedImage): string => {
     const directory = (image.directoryName || '').replace(/\\/g, '/').toLowerCase();
     
     const tags = (image.tags || []).join(' ').toLowerCase();
+    const autoTags = (image.autoTags || []).join(' ').toLowerCase();
+    const metadataTags = (image.metadataTags || []).join(' ').toLowerCase();
 
-    return [name, relativePath, directory, tags].filter(Boolean).join(' ');
+    return [name, relativePath, directory, tags, autoTags, metadataTags].filter(Boolean).join(' ');
 };
 
 const buildEnrichedSearchText = (image: IndexedImage): string => {
@@ -642,6 +644,14 @@ export const useImageStore = create<ImageState>((set, get) => {
         };
     };
 
+    const mergeAnnotationTags = (annotation: ImageAnnotations): string[] => {
+        return [...new Set([
+            ...(annotation.tags || []),
+            ...(annotation.autoTags || []),
+            ...(annotation.metadataTags || []),
+        ])];
+    };
+
     // --- Helper function to apply annotations to images ---
     const applyAnnotationsToImages = (images: IndexedImage[], annotations: Map<string, ImageAnnotations>): IndexedImage[] => {
         let hasChanges = false;
@@ -650,14 +660,17 @@ export const useImageStore = create<ImageState>((set, get) => {
             if (annotation) {
                 // Check if annotation values are different from current image values
                 const isFavoriteChanged = img.isFavorite !== annotation.isFavorite;
-                const tagsChanged = JSON.stringify(img.tags || []) !== JSON.stringify(annotation.tags);
+                const mergedTags = mergeAnnotationTags(annotation);
+                const tagsChanged = JSON.stringify(img.tags || []) !== JSON.stringify(mergedTags);
 
                 if (isFavoriteChanged || tagsChanged) {
                     hasChanges = true;
                     return {
                         ...img,
                         isFavorite: annotation.isFavorite,
-                        tags: annotation.tags,
+                        tags: mergedTags,
+                        autoTags: annotation.autoTags || [],
+                        metadataTags: annotation.metadataTags || [],
                     };
                 }
             }
@@ -1892,20 +1905,22 @@ export const useImageStore = create<ImageState>((set, get) => {
                             tagMap.set(id, normalizedTags);
                         });
 
-                        // Add generated tags as standard annotations
+                        // Add generated tags to autoTags (not manual tags)
                         const { annotations } = get();
                         const updatedAnnotations: ImageAnnotations[] = [];
 
                         for (const [imageId, newTags] of tagMap) {
                             const current = annotations.get(imageId);
-                            const existingTags = current?.tags ?? [];
-                            const mergedTags = [...new Set([...existingTags, ...newTags])];
-                            if (mergedTags.length === existingTags.length) continue;
+                            const existingAutoTags = current?.autoTags ?? [];
+                            const mergedAutoTags = [...new Set([...existingAutoTags, ...newTags])];
+                            if (mergedAutoTags.length === existingAutoTags.length) continue;
 
                             updatedAnnotations.push({
                                 imageId,
                                 isFavorite: current?.isFavorite ?? false,
-                                tags: mergedTags,
+                                tags: current?.tags ?? [],
+                                autoTags: mergedAutoTags,
+                                metadataTags: current?.metadataTags ?? [],
                                 addedAt: current?.addedAt ?? generatedAt,
                                 updatedAt: generatedAt,
                             });
@@ -1926,7 +1941,11 @@ export const useImageStore = create<ImageState>((set, get) => {
 
                             const updateList = (list: IndexedImage[]) => list.map(img => {
                                 const annotation = newAnnotations.get(img.id);
-                                return annotation ? { ...img, tags: annotation.tags } : img;
+                                if (annotation) {
+                                    const mergedTags = mergeAnnotationTags(annotation);
+                                    return { ...img, tags: mergedTags, autoTags: annotation.autoTags, metadataTags: annotation.metadataTags };
+                                }
+                                return img;
                             });
 
                             return {
@@ -2012,7 +2031,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                     }
                 }
 
-                // Restore auto-tags and merge into standard annotations
+                // Restore auto-tags into autoTags field
                 const autoTagCache = await loadAutoTagCache(directoryPath, scanSubfolders);
                 if (autoTagCache?.autoTags && Object.keys(autoTagCache.autoTags).length > 0) {
                     const tagMap = new Map<string, string[]>();
@@ -2025,13 +2044,15 @@ export const useImageStore = create<ImageState>((set, get) => {
                     const currentAnnotations = get().annotations;
                     for (const [imageId, newTags] of tagMap) {
                         const current = currentAnnotations.get(imageId);
-                        const existingTags = current?.tags ?? [];
-                        const tagsToAdd = newTags.filter(t => !existingTags.includes(t));
+                        const existingAutoTags = current?.autoTags ?? [];
+                        const tagsToAdd = newTags.filter(t => !existingAutoTags.includes(t));
                         if (tagsToAdd.length > 0) {
                             cacheAnnotations.push({
                                 imageId,
                                 isFavorite: current?.isFavorite ?? false,
-                                tags: [...existingTags, ...tagsToAdd],
+                                tags: current?.tags ?? [],
+                                autoTags: [...existingAutoTags, ...tagsToAdd],
+                                metadataTags: current?.metadataTags ?? [],
                                 addedAt: current?.addedAt ?? autoTagCache.lastGenerated ?? Date.now(),
                                 updatedAt: Date.now(),
                             });
@@ -2049,12 +2070,16 @@ export const useImageStore = create<ImageState>((set, get) => {
                             }
                             const newImages = state.images.map(img => {
                                 const annotation = newAnnotations.get(img.id);
-                                return annotation ? { ...img, tags: annotation.tags } : img;
+                                if (annotation) {
+                                    const mergedTags = mergeAnnotationTags(annotation);
+                                    return { ...img, tags: mergedTags, autoTags: annotation.autoTags, metadataTags: annotation.metadataTags };
+                                }
+                                return img;
                             });
                             return _updateState({ ...state, annotations: newAnnotations }, newImages);
                         });
                     }
-                    console.log(`Restored auto-tags for ${tagMap.size} images from cache as standard tags`);
+                    console.log(`Restored auto-tags for ${tagMap.size} images from cache`);
                 }
             } catch (error) {
                 console.debug('Smart library cache not available:', error);
@@ -2094,6 +2119,8 @@ export const useImageStore = create<ImageState>((set, get) => {
                 imageId,
                 isFavorite: newIsFavorite,
                 tags: currentAnnotation?.tags ?? [],
+                autoTags: currentAnnotation?.autoTags ?? [],
+                metadataTags: currentAnnotation?.metadataTags ?? [],
                 addedAt: currentAnnotation?.addedAt ?? Date.now(),
                 updatedAt: Date.now(),
             };
@@ -2134,6 +2161,8 @@ export const useImageStore = create<ImageState>((set, get) => {
                     imageId,
                     isFavorite,
                     tags: current?.tags ?? [],
+                    autoTags: current?.autoTags ?? [],
+                    metadataTags: current?.metadataTags ?? [],
                     addedAt: current?.addedAt ?? Date.now(),
                     updatedAt: Date.now(),
                 });
@@ -2178,8 +2207,13 @@ export const useImageStore = create<ImageState>((set, get) => {
             const { annotations } = get();
             const currentAnnotation = annotations.get(imageId);
 
-            // Don't add duplicate
-            if (currentAnnotation?.tags.includes(normalizedTag)) {
+            // Don't add duplicate across any tag source
+            const allExisting = [
+                ...(currentAnnotation?.tags ?? []),
+                ...(currentAnnotation?.autoTags ?? []),
+                ...(currentAnnotation?.metadataTags ?? []),
+            ];
+            if (allExisting.includes(normalizedTag)) {
                 return;
             }
 
@@ -2187,6 +2221,8 @@ export const useImageStore = create<ImageState>((set, get) => {
                 imageId,
                 isFavorite: currentAnnotation?.isFavorite ?? false,
                 tags: [...(currentAnnotation?.tags ?? []), normalizedTag],
+                autoTags: currentAnnotation?.autoTags ?? [],
+                metadataTags: currentAnnotation?.metadataTags ?? [],
                 addedAt: currentAnnotation?.addedAt ?? Date.now(),
                 updatedAt: Date.now(),
             };
@@ -2198,8 +2234,9 @@ export const useImageStore = create<ImageState>((set, get) => {
                 const newAnnotations = new Map(state.annotations);
                 newAnnotations.set(imageId, updatedAnnotation);
 
+                const mergedTags = mergeAnnotationTags(updatedAnnotation);
                 const updatedImages = state.images.map(img =>
-                    img.id === imageId ? { ...img, tags: updatedAnnotation.tags } : img
+                    img.id === imageId ? { ...img, tags: mergedTags, autoTags: updatedAnnotation.autoTags, metadataTags: updatedAnnotation.metadataTags } : img
                 );
 
                 nextRecentTags = updateRecentTags(state.recentTags, normalizedTag);
@@ -2228,15 +2265,24 @@ export const useImageStore = create<ImageState>((set, get) => {
             const { annotations } = get();
             const currentAnnotation = annotations.get(imageId);
 
-            if (!currentAnnotation || !currentAnnotation.tags.includes(tag)) {
-                return;
-            }
+            if (!currentAnnotation) return;
+
+            // Remove from whichever source contains it
+            const inManual = currentAnnotation.tags.includes(tag);
+            const inAuto = (currentAnnotation.autoTags || []).includes(tag);
+            const inMetadata = (currentAnnotation.metadataTags || []).includes(tag);
+
+            if (!inManual && !inAuto && !inMetadata) return;
 
             const updatedAnnotation: ImageAnnotations = {
                 ...currentAnnotation,
-                tags: currentAnnotation.tags.filter(t => t !== tag),
+                tags: inManual ? currentAnnotation.tags.filter(t => t !== tag) : currentAnnotation.tags,
+                autoTags: inAuto ? (currentAnnotation.autoTags || []).filter(t => t !== tag) : (currentAnnotation.autoTags || []),
+                metadataTags: inMetadata ? (currentAnnotation.metadataTags || []).filter(t => t !== tag) : (currentAnnotation.metadataTags || []),
                 updatedAt: Date.now(),
             };
+
+            const mergedTags = mergeAnnotationTags(updatedAnnotation);
 
             // Update state
             set(state => {
@@ -2244,7 +2290,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                 newAnnotations.set(imageId, updatedAnnotation);
 
                 const updatedImages = state.images.map(img =>
-                    img.id === imageId ? { ...img, tags: updatedAnnotation.tags } : img
+                    img.id === imageId ? { ...img, tags: mergedTags, autoTags: updatedAnnotation.autoTags, metadataTags: updatedAnnotation.metadataTags } : img
                 );
 
                 const newState = {
@@ -2274,14 +2320,21 @@ export const useImageStore = create<ImageState>((set, get) => {
 
             for (const imageId of imageIds) {
                 const current = annotations.get(imageId);
-                if (current?.tags.includes(normalizedTag)) {
-                    continue; // Skip if already tagged
+                const allExisting = [
+                    ...(current?.tags ?? []),
+                    ...(current?.autoTags ?? []),
+                    ...(current?.metadataTags ?? []),
+                ];
+                if (allExisting.includes(normalizedTag)) {
+                    continue; // Skip if already tagged in any source
                 }
 
                 updatedAnnotations.push({
                     imageId,
                     isFavorite: current?.isFavorite ?? false,
                     tags: [...(current?.tags ?? []), normalizedTag],
+                    autoTags: current?.autoTags ?? [],
+                    metadataTags: current?.metadataTags ?? [],
                     addedAt: current?.addedAt ?? Date.now(),
                     updatedAt: Date.now(),
                 });
@@ -2299,7 +2352,8 @@ export const useImageStore = create<ImageState>((set, get) => {
                 const updatedImages = state.images.map(img => {
                     const annotation = newAnnotations.get(img.id);
                     if (annotation && imageIds.includes(img.id)) {
-                        return { ...img, tags: annotation.tags };
+                        const mergedTags = mergeAnnotationTags(annotation);
+                        return { ...img, tags: mergedTags, autoTags: annotation.autoTags, metadataTags: annotation.metadataTags };
                     }
                     return img;
                 });
@@ -2332,13 +2386,18 @@ export const useImageStore = create<ImageState>((set, get) => {
 
             for (const imageId of imageIds) {
                 const current = annotations.get(imageId);
-                if (!current || !current.tags.includes(tag)) {
-                    continue; // Skip if doesn't have this tag
-                }
+                if (!current) continue;
+
+                const inManual = current.tags.includes(tag);
+                const inAuto = (current.autoTags || []).includes(tag);
+                const inMetadata = (current.metadataTags || []).includes(tag);
+                if (!inManual && !inAuto && !inMetadata) continue;
 
                 updatedAnnotations.push({
                     ...current,
-                    tags: current.tags.filter(t => t !== tag),
+                    tags: inManual ? current.tags.filter(t => t !== tag) : current.tags,
+                    autoTags: inAuto ? (current.autoTags || []).filter(t => t !== tag) : (current.autoTags || []),
+                    metadataTags: inMetadata ? (current.metadataTags || []).filter(t => t !== tag) : (current.metadataTags || []),
                     updatedAt: Date.now(),
                 });
             }
@@ -2353,7 +2412,8 @@ export const useImageStore = create<ImageState>((set, get) => {
                 const updatedImages = state.images.map(img => {
                     const annotation = newAnnotations.get(img.id);
                     if (annotation && imageIds.includes(img.id)) {
-                        return { ...img, tags: annotation.tags };
+                        const mergedTags = mergeAnnotationTags(annotation);
+                        return { ...img, tags: mergedTags, autoTags: annotation.autoTags, metadataTags: annotation.metadataTags };
                     }
                     return img;
                 });
@@ -2404,23 +2464,30 @@ export const useImageStore = create<ImageState>((set, get) => {
 
             // Collect all tags to import from metadata
             for (const image of images) {
-                const metadataTags = image.metadata?.normalizedMetadata?.tags;
-                if (!metadataTags || metadataTags.length === 0) continue;
+                const rawTags = image.metadata?.normalizedMetadata?.tags;
+                if (!rawTags || rawTags.length === 0) continue;
 
                 const currentAnnotation = annotations.get(image.id);
-                const existingTags = currentAnnotation?.tags ?? [];
+                const existingMetadataTags = currentAnnotation?.metadataTags ?? [];
+                const allExisting = [
+                    ...(currentAnnotation?.tags ?? []),
+                    ...(currentAnnotation?.autoTags ?? []),
+                    ...existingMetadataTags,
+                ];
 
-                // Normalize and filter out duplicates
-                const newTags = metadataTags
-                    .map(tag => tag.trim().toLowerCase())
-                    .filter(tag => tag && !existingTags.includes(tag));
+                // Normalize and filter out duplicates across all sources
+                const newTags = rawTags
+                    .map((tag: string) => tag.trim().toLowerCase())
+                    .filter((tag: string) => tag && !allExisting.includes(tag));
 
                 if (newTags.length === 0) continue;
 
                 const updatedAnnotation: ImageAnnotations = {
                     imageId: image.id,
                     isFavorite: currentAnnotation?.isFavorite ?? false,
-                    tags: [...existingTags, ...newTags],
+                    tags: currentAnnotation?.tags ?? [],
+                    autoTags: currentAnnotation?.autoTags ?? [],
+                    metadataTags: [...existingMetadataTags, ...newTags],
                     addedAt: currentAnnotation?.addedAt ?? Date.now(),
                     updatedAt: Date.now(),
                 };
@@ -2439,7 +2506,11 @@ export const useImageStore = create<ImageState>((set, get) => {
 
                 const updatedImages = state.images.map(img => {
                     const annotation = newAnnotations.get(img.id);
-                    return annotation ? { ...img, tags: annotation.tags } : img;
+                    if (annotation) {
+                        const mergedTags = mergeAnnotationTags(annotation);
+                        return { ...img, tags: mergedTags, autoTags: annotation.autoTags, metadataTags: annotation.metadataTags };
+                    }
+                    return img;
                 });
 
                 const newState = {
