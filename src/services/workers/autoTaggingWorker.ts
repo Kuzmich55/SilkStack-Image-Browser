@@ -75,7 +75,7 @@ async function startAutoTagging(
     // LaMini-Flan-T5-77M is extremely small and works fast.
     await modelManager.loadModel('built-in-text', provider, {
       provider: 'local-python', 
-      modelId: 'Xenova/LaMini-Flan-T5-77M'
+      modelId: 'Xenova/flan-t5-base'
     });
 
     const tagGenerator = new TagGenerator(modelManager, 'built-in-text');
