@@ -2537,10 +2537,15 @@ export const useImageStore = create<ImageState>((set, get) => {
             const updatedAnnotations: ImageAnnotations[] = [];
 
             for (const [, annotation] of annotations) {
-                if ((annotation.autoTags || []).length > 0) {
+                const autoTags = annotation.autoTags || [];
+                if (autoTags.length > 0) {
                     updatedAnnotations.push({
-                        ...annotation,
+                        imageId: annotation.imageId,
+                        isFavorite: annotation.isFavorite,
+                        tags: annotation.tags || [],
                         autoTags: [],
+                        metadataTags: annotation.metadataTags || [],
+                        addedAt: annotation.addedAt,
                         updatedAt: Date.now(),
                     });
                 }
@@ -2555,30 +2560,35 @@ export const useImageStore = create<ImageState>((set, get) => {
                 console.error('Failed to clear auto-tags:', error);
             }
 
-            // Update in-memory state
+            // Update in-memory state — only replace what changed
             set(state => {
                 const newAnnotations = new Map(state.annotations);
                 for (const annotation of updatedAnnotations) {
                     newAnnotations.set(annotation.imageId, annotation);
                 }
 
+                const changedIds = new Set(updatedAnnotations.map(a => a.imageId));
                 const updatedImages = state.images.map(img => {
+                    if (!changedIds.has(img.id)) return img;
                     const annotation = newAnnotations.get(img.id);
-                    if (annotation) {
-                        const mergedTags = mergeAnnotationTags(annotation);
-                        return { ...img, tags: mergedTags, autoTags: [], metadataTags: annotation.metadataTags };
-                    }
-                    return img;
+                    if (!annotation) return img;
+                    const mergedTags = mergeAnnotationTags(annotation);
+                    return {
+                        ...img,
+                        tags: mergedTags,
+                        autoTags: [],
+                        metadataTags: annotation.metadataTags,
+                    };
                 });
 
-                const newState = {
-                    ...state,
+                return {
                     annotations: newAnnotations,
                     images: updatedImages,
                 };
-
-                return { ...newState, ...filterAndSort(newState) };
             });
+
+            // Re-run filter/sort to refresh availableTags etc.
+            set(state => filterAndSort(state));
 
             console.log(`Cleared auto-tags from ${updatedAnnotations.length} images`);
         },
