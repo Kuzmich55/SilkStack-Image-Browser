@@ -11,7 +11,7 @@
     "dev": "vite --host 0.0.0.0",
     "dev:app": "node scripts/start-dev.js",
     "prebuild": "node -e \"require('fs').copyFileSync('docs/CHANGELOG.md', 'public/CHANGELOG.md')\"",
-    "build": "tsc -b && vite build",
+    "build": "npm run build --prefix ai-intelligence && tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "electron": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
