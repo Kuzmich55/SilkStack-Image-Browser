@@ -1997,12 +1997,15 @@ export const useImageStore = create<ImageState>((set, get) => {
                 loras: img.loras,
             }));
 
+            const disableAiFallback = useSettingsStore.getState().disableAiFallback;
+
             worker.postMessage({
                 type: 'start',
                 payload: {
                     images: taggingImages,
                     topN: options?.topN,
                     minScore: options?.minScore,
+                    disableFallback: disableAiFallback,
                 },
             });
         },

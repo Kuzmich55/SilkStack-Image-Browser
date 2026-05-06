@@ -1,13 +1,18 @@
 /**
  * Auto-Tagging Web Worker
  *
- * Extracts auto-tags in the background using rule-based prompt parsing.
- * No model loading needed — TagGenerator is purely algorithmic.
+ * Extracts auto-tags in the background. Uses LLM-based extraction via WebLLM
+ * (Gemma 3 1B) when WebGPU is available, falling back to rule-based extraction
+ * when it's not.
  */
 
 import type { AutoTag } from '../../types';
 import type { TaggingImage } from '../autoTaggingEngine';
-import { TagGenerator } from '@ai-images-browser/ai-intelligence';
+import {
+  LLMTagGenerator,
+  TagGenerator,
+  TAG_GENERATION_MODEL_ID,
+} from '@ai-images-browser/ai-intelligence';
 
 type WorkerMessage =
   | {
@@ -15,6 +20,7 @@ type WorkerMessage =
       payload: {
         images: TaggingImage[];
         topN?: number;
+        disableFallback?: boolean;
       };
     }
   | { type: 'cancel' };
@@ -42,6 +48,10 @@ type WorkerResponse =
     };
 
 let isCancelled = false;
+let llmGenerator: LLMTagGenerator | null = null;
+let fallbackGenerator: TagGenerator | null = null;
+let llmInitError: string | null = null;
+let mode: 'llm' | 'fallback' = 'fallback';
 
 self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
   const message = e.data;
@@ -50,6 +60,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
     case 'start':
       await startAutoTagging(message.payload.images, {
         topN: message.payload.topN,
+        disableFallback: message.payload.disableFallback,
       });
       break;
     case 'cancel':
@@ -59,15 +70,57 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
   }
 };
 
+async function initLLM(): Promise<boolean> {
+  if (llmGenerator) return true;
+
+  postProgress(0, 0, 'Loading tag generation model...');
+
+  try {
+    llmGenerator = new LLMTagGenerator(TAG_GENERATION_MODEL_ID, (report) => {
+      if (!isCancelled) {
+        postProgress(report.progress, 0, `Loading model: ${report.text}`);
+      }
+    });
+
+    await llmGenerator.initialize();
+
+    if (!isCancelled) {
+      mode = 'llm';
+      return true;
+    }
+  } catch (err) {
+    llmInitError = err instanceof Error ? err.message : String(err);
+    console.warn('[autoTaggingWorker] LLM model failed to load, falling back to rule-based:', err);
+  }
+
+  return false;
+}
+
+function getFallbackGenerator(): TagGenerator {
+  if (!fallbackGenerator) {
+    fallbackGenerator = new TagGenerator();
+  }
+  return fallbackGenerator;
+}
+
 async function startAutoTagging(
   images: TaggingImage[],
-  options: { topN?: number }
+  options: { topN?: number; disableFallback?: boolean },
 ): Promise<void> {
   try {
     isCancelled = false;
-    postProgress(0, images.length, 'Extracting tags...');
 
-    const tagGenerator = new TagGenerator();
+    // Try LLM first; fall back to rule-based if WebGPU/model unavailable
+    const llmReady = await initLLM();
+
+    if (isCancelled) return;
+
+    if (!llmReady && options.disableFallback) {
+      const detail = llmInitError ? ` Reason: ${llmInitError}` : '';
+      postError(`AI model failed to load and fallback is disabled. Enable the fallback in Settings or check that WebGPU is available.${detail}`);
+      return;
+    }
+
     const autoTags: Record<string, AutoTag[]> = {};
     const total = images.length;
 
@@ -82,19 +135,30 @@ async function startAutoTagging(
 
       let generatedTags: string[] = [];
       if (prompt.trim()) {
-        generatedTags = await tagGenerator.generateTagsFromPrompt(prompt);
+        if (llmReady && llmGenerator) {
+          generatedTags = await llmGenerator.generateTagsFromPrompt(prompt);
+        } else {
+          generatedTags = await getFallbackGenerator().generateTagsFromPrompt(prompt);
+        }
       }
 
       if (options.topN && generatedTags.length > options.topN) {
         generatedTags = generatedTags.slice(0, options.topN);
       }
 
-      autoTags[image.id] = [...new Set(generatedTags)].map(t => ({
+      autoTags[image.id] = [...new Set(generatedTags)].map((t) => ({
         tag: t,
         sourceType: 'prompt' as const,
       }));
 
-      postProgress(i + 1, total, `Generating auto-tags... (${i + 1}/${total})`);
+      const label = mode === 'llm' ? 'Generating AI tags' : 'Extracting tags';
+      postProgress(i + 1, total, `${label}... (${i + 1}/${total})`);
+    }
+
+    // Clean up LLM engine to free GPU memory
+    if (llmGenerator) {
+      llmGenerator.dispose();
+      llmGenerator = null;
     }
 
     postComplete(autoTags);

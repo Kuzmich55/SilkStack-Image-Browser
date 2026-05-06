@@ -68,6 +68,7 @@ interface SettingsState {
   enableSafeMode: boolean;
   displayStarredFirst: boolean;
   confirmOnDelete: boolean;
+  disableAiFallback: boolean;
 
   // A1111 Integration settings
   a1111ServerUrl: string;
@@ -102,6 +103,7 @@ interface SettingsState {
   setComfyUIServerUrl: (url: string) => void;
   setComfyUIConnectionStatus: (status: 'unknown' | 'connected' | 'error') => void;
   setConfirmOnDelete: (value: boolean) => void;
+  setDisableAiFallback: (value: boolean) => void;
   setSidebarCollapsed: (value: boolean) => void;
   resetState: () => void;
 }
@@ -134,6 +136,7 @@ export const useSettingsStore = create<SettingsState>()(
       enableSafeMode: true,
       displayStarredFirst: false,
       confirmOnDelete: true,
+      disableAiFallback: false,
 
       // A1111 Integration initial state
       a1111ServerUrl: 'http://127.0.0.1:7860',
@@ -179,6 +182,7 @@ export const useSettingsStore = create<SettingsState>()(
       setEnableSafeMode: (value) => set({ enableSafeMode: !!value }),
       setDisplayStarredFirst: (value) => set({ displayStarredFirst: !!value }),
       setConfirmOnDelete: (value) => set({ confirmOnDelete: !!value }),
+      setDisableAiFallback: (value) => set({ disableAiFallback: !!value }),
       setSidebarCollapsed: (value) => set({ isSidebarCollapsed: !!value }),
       updateKeybinding: (scope, action, keybinding) =>
         set((state) => ({
@@ -226,6 +230,7 @@ export const useSettingsStore = create<SettingsState>()(
         comfyUIServerUrl: 'http://127.0.0.1:8188',
         comfyUILastConnectionStatus: 'unknown',
         confirmOnDelete: true,
+        disableAiFallback: false,
         isSidebarCollapsed: true,
       }),
     }),
@@ -254,6 +259,10 @@ export const useSettingsStore = create<SettingsState>()(
 
         if (state && typeof state.confirmOnDelete !== 'boolean') {
           state.confirmOnDelete = true;
+        }
+
+        if (state && typeof state.disableAiFallback !== 'boolean') {
+          state.disableAiFallback = false;
         }
 
         if (state && typeof state.isSidebarCollapsed !== 'boolean') {

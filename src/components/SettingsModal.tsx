@@ -41,6 +41,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   const setBlurSensitiveImages = useSettingsStore((state) => state.setBlurSensitiveImages);
   const confirmOnDelete = useSettingsStore((state) => state.confirmOnDelete);
   const setConfirmOnDelete = useSettingsStore((state) => state.setConfirmOnDelete);
+  const disableAiFallback = useSettingsStore((state) => state.disableAiFallback);
+  const setDisableAiFallback = useSettingsStore((state) => state.setDisableAiFallback);
 
   const [sensitiveTagsInput, setSensitiveTagsInput] = useState('');
   const [cacheFolderPath, setCacheFolderPath] = useState('');
@@ -286,6 +288,24 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                             type="checkbox"
                             checked={blurSensitiveImages}
                             onChange={(event) => setBlurSensitiveImages(event.target.checked)}
+                            className="sr-only peer"
+                          />
+                          <div className="w-11 h-6 bg-gray-700 rounded-full peer peer-focus:ring-2 peer-focus:ring-blue-500 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
+                        </label>
+                      </div>
+
+                      <div className="flex items-start justify-between bg-gray-900/80 p-5 rounded-xl border border-gray-700/50 shadow-sm transition-all hover:border-gray-600">
+                        <div className="pr-6">
+                          <p className="text-sm font-medium text-gray-200">Disable AI fallback for auto-tagging</p>
+                          <p className="text-sm text-gray-400 mt-1 leading-relaxed">
+                            If enabled, auto-tagging will only use AI models (Gemma 3 via WebLLM). Rule-based extraction will not be used as a fallback. Useful for testing or when you want consistent AI-quality tags.
+                          </p>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-1">
+                          <input
+                            type="checkbox"
+                            checked={disableAiFallback}
+                            onChange={(event) => setDisableAiFallback(event.target.checked)}
                             className="sr-only peer"
                           />
                           <div className="w-11 h-6 bg-gray-700 rounded-full peer peer-focus:ring-2 peer-focus:ring-blue-500 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
