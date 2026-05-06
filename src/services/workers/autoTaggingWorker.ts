@@ -1,12 +1,13 @@
 /**
  * Auto-Tagging Web Worker
  *
- * Extracts auto-tags in the background using LLM logic.
+ * Extracts auto-tags in the background using rule-based prompt parsing.
+ * No model loading needed — TagGenerator is purely algorithmic.
  */
 
 import type { AutoTag } from '../../types';
 import type { TaggingImage } from '../autoTaggingEngine';
-import { ModelManager, TransformersProvider, TagGenerator, MODEL_TEXT_GENERATION, MODEL_KEY_BUILT_IN_TEXT } from '@ai-images-browser/ai-intelligence';
+import { TagGenerator } from '@ai-images-browser/ai-intelligence';
 
 type WorkerMessage =
   | {
@@ -14,7 +15,6 @@ type WorkerMessage =
       payload: {
         images: TaggingImage[];
         topN?: number;
-        minScore?: number; // Kept for interface compatibility
       };
     }
   | { type: 'cancel' };
@@ -65,26 +65,9 @@ async function startAutoTagging(
 ): Promise<void> {
   try {
     isCancelled = false;
-    postProgress(0, images.length, 'Initializing AI Model...');
+    postProgress(0, images.length, 'Extracting tags...');
 
-    // Initialize the AI Model Manager inside the Web Worker
-    const modelManager = new ModelManager();
-    const provider = new TransformersProvider();
-    
-    // Load the text-generation model for tag extraction.
-    // The model ID is configured centrally in ai-intelligence/src/core/types.ts
-    await modelManager.loadModel(MODEL_KEY_BUILT_IN_TEXT, provider, {
-      provider: 'local-python',
-      modelId: MODEL_TEXT_GENERATION
-    });
-
-    const tagGenerator = new TagGenerator(modelManager, MODEL_KEY_BUILT_IN_TEXT);
-
-    if (isCancelled) {
-      postProgress(0, 0, 'Cancelled');
-      return;
-    }
-
+    const tagGenerator = new TagGenerator();
     const autoTags: Record<string, AutoTag[]> = {};
     const total = images.length;
 
@@ -95,22 +78,20 @@ async function startAutoTagging(
       }
 
       const image = images[i];
-      
       const prompt = image.prompt || '';
-      
+
       let generatedTags: string[] = [];
       if (prompt.trim()) {
-         generatedTags = await tagGenerator.generateTagsFromPrompt(prompt);
+        generatedTags = await tagGenerator.generateTagsFromPrompt(prompt);
       }
-      
-      // Limit to topN if provided
+
       if (options.topN && generatedTags.length > options.topN) {
-          generatedTags = generatedTags.slice(0, options.topN);
+        generatedTags = generatedTags.slice(0, options.topN);
       }
 
       autoTags[image.id] = [...new Set(generatedTags)].map(t => ({
-          tag: t,
-          sourceType: 'prompt'
+        tag: t,
+        sourceType: 'prompt' as const,
       }));
 
       postProgress(i + 1, total, `Generating auto-tags... (${i + 1}/${total})`);
