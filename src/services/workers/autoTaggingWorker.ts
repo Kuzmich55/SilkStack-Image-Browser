@@ -6,7 +6,7 @@
 
 import type { AutoTag } from '../../types';
 import type { TaggingImage } from '../autoTaggingEngine';
-import { ModelManager, TransformersProvider, TagGenerator } from '@ai-images-browser/ai-intelligence';
+import { ModelManager, TransformersProvider, TagGenerator, MODEL_TEXT_GENERATION, MODEL_KEY_BUILT_IN_TEXT } from '@ai-images-browser/ai-intelligence';
 
 type WorkerMessage =
   | {
@@ -71,14 +71,14 @@ async function startAutoTagging(
     const modelManager = new ModelManager();
     const provider = new TransformersProvider();
     
-    // We use a small lightweight model as configured in TagGenerator or directly passing model ID.
-    // LaMini-Flan-T5-77M is extremely small and works fast.
-    await modelManager.loadModel('built-in-text', provider, {
-      provider: 'local-python', 
-      modelId: 'Xenova/flan-t5-base'
+    // Load the text-generation model for tag extraction.
+    // The model ID is configured centrally in ai-intelligence/src/core/types.ts
+    await modelManager.loadModel(MODEL_KEY_BUILT_IN_TEXT, provider, {
+      provider: 'local-python',
+      modelId: MODEL_TEXT_GENERATION
     });
 
-    const tagGenerator = new TagGenerator(modelManager, 'built-in-text');
+    const tagGenerator = new TagGenerator(modelManager, MODEL_KEY_BUILT_IN_TEXT);
 
     if (isCancelled) {
       postProgress(0, 0, 'Cancelled');
