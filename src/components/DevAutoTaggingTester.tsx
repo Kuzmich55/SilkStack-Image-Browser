@@ -96,12 +96,16 @@ export default function DevAutoTaggingTester() {
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-gray-900 text-gray-100 font-sans">
-      {/* Header */}
-      <div className="px-6 py-4 border-b border-gray-800/40 flex items-center gap-4 shrink-0">
+      {/* Header — draggable region (titleBarStyle: hidden needs explicit drag region) */}
+      <div
+        className="px-6 py-4 border-b border-gray-800/40 flex items-center gap-4 shrink-0"
+        style={{ WebkitAppRegion: 'drag', paddingTop: '36px' } as React.CSSProperties}
+      >
         <button
           onClick={handleClose}
           className="px-3 py-1.5 text-xs bg-gray-700/50 border border-gray-600/50 rounded-lg text-gray-400 hover:bg-gray-600/50 hover:text-gray-200 transition-colors shrink-0"
           title="Ctrl+Shift+D"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
           &#8592; Close
         </button>
