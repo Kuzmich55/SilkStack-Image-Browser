@@ -706,6 +706,57 @@ function setupFileOperationHandlers() {
     return candidate;
   };
 
+  // --- Dev Tools Window IPC ---
+  ipcMain.handle("open-dev-tools", async () => {
+    try {
+      const isDark = nativeTheme.shouldUseDarkColors;
+
+      const devWindow = new BrowserWindow({
+        width: 900,
+        height: 700,
+        minWidth: 600,
+        minHeight: 400,
+        backgroundColor: isDark ? '#0f1117' : '#ffffff',
+        icon: getIconPath(),
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          enableRemoteModule: false,
+          webSecurity: true,
+          preload: path.join(__dirname, "preload.js"),
+        },
+        titleBarStyle: "hidden",
+        titleBarOverlay: {
+          color: isDark ? '#1a1a1a' : '#f3f4f6',
+          symbolColor: isDark ? '#ffffff' : '#000000',
+          height: 32,
+        },
+        show: false,
+        autoHideMenuBar: true,
+        parent: null,
+      });
+
+      const queryString = "?devtools=auto-tag";
+      if (isDev && !process.argv.includes("--dist")) {
+        devWindow.loadURL(`http://localhost:5173${queryString}`);
+      } else {
+        devWindow.loadFile(
+          path.join(__dirname, "..", "dist", "index.html"),
+          { search: queryString.substring(1) }
+        );
+      }
+
+      devWindow.once("ready-to-show", () => {
+        devWindow.show();
+      });
+
+      return { success: true };
+    } catch (err) {
+      console.error("Failed to open dev tools window:", err);
+      return { success: false, error: err.message };
+    }
+  });
+
   // --- Image Viewer Window IPC ---
   ipcMain.handle("open-image-viewer", async (event, data) => {
     try {

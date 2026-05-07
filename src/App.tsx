@@ -246,6 +246,22 @@ export default function App() {
     }
   }, []);
 
+  // Dev tools: Ctrl+Shift+D opens the auto-tagging tester in a new window
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'D') {
+        e.preventDefault();
+        if (window.electronAPI) {
+          window.electronAPI.openDevTools();
+        } else {
+          window.open(`${window.location.origin}/?devtools=auto-tag`, '_blank');
+        }
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
   // Initialize the cache manager on startup
   useEffect(() => {
     const initializeCache = async () => {

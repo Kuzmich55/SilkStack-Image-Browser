@@ -191,6 +191,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   executeEditAction: (action) => ipcRenderer.invoke('execute-edit-action', action),
   isDev: () => ipcRenderer.invoke('is-dev'),
 
+  // Dev Tools
+  openDevTools: () => ipcRenderer.invoke('open-dev-tools'),
+
   // Image Viewer Window
   openImageViewer: (data) => ipcRenderer.invoke('open-image-viewer', data),
   imageViewerNavigate: (direction) => ipcRenderer.send('image-viewer-navigate', direction),

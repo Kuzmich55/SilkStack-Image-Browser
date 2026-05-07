@@ -264,6 +264,9 @@ export interface ElectronAPI {
   openExternal: (url: string) => Promise<{ success: boolean; error?: string }>;
   isDev: () => Promise<boolean>;
 
+  // Dev Tools
+  openDevTools: () => Promise<{ success: boolean; error?: string }>;
+
   // Image Viewer Window
   openImageViewer: (data: {
     imageId: string;
