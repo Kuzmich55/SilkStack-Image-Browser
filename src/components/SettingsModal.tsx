@@ -298,7 +298,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                         <div className="pr-6">
                           <p className="text-sm font-medium text-gray-200">Disable AI fallback for auto-tagging</p>
                           <p className="text-sm text-gray-400 mt-1 leading-relaxed">
-                            If enabled, auto-tagging will only use AI models (Gemma 3 via WebLLM). Rule-based extraction will not be used as a fallback. Useful for testing or when you want consistent AI-quality tags.
+                            If enabled, auto-tagging will only use AI models (Llama 3.2 3B via WebLLM). Rule-based extraction will not be used as a fallback. Useful for testing or when you want consistent AI-quality tags.
                           </p>
                         </div>
                         <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-1">

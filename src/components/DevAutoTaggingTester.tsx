@@ -111,7 +111,7 @@ export default function DevAutoTaggingTester() {
         </button>
         <div>
           <h1 className="text-lg font-semibold">Auto-Tagging Test</h1>
-          <p className="text-sm text-gray-400">Gemma 3 1B via WebLLM — local inference</p>
+          <p className="text-sm text-gray-400">Llama 3.2 3B via WebLLM — local inference</p>
         </div>
         <div className="ml-auto flex items-center gap-3">
           <div className={`w-2 h-2 rounded-full ${

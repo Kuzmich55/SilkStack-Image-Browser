@@ -1,9 +1,9 @@
 /**
  * Auto-Tagging Web Worker
  *
- * Extracts auto-tags in the background. Uses LLM-based extraction via WebLLM
- * (Gemma 3 1B) when WebGPU is available, falling back to rule-based extraction
- * when it's not.
+ * The worker initializes the LLM-based Tag Generator (Llama 3.2 3B) when
+ * WebGPU is available, falling back to rule-based extraction on errors or
+ * unsupported environments.
  */
 
 import type { AutoTag } from '../../types';
