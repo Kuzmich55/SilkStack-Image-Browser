@@ -1617,10 +1617,10 @@ const ImageModal: React.FC<ImageModalProps> = ({
                     {currentTags.map((tag) => {
                       const source = getTagSource(tag);
                       const colors = source === 'auto'
-                        ? 'bg-cyan-600/20 border border-cyan-500/50 text-cyan-300'
+                        ? 'bg-cyan-600/20 border border-cyan-500/50 text-cyan-700 dark:text-cyan-300'
                         : source === 'metadata'
-                        ? 'bg-emerald-600/20 border border-emerald-500/50 text-emerald-300'
-                        : 'bg-blue-600/20 border border-blue-500/50 text-blue-300';
+                        ? 'bg-emerald-600/20 border border-emerald-500/50 text-emerald-700 dark:text-emerald-300'
+                        : 'bg-blue-600/20 border border-blue-500/50 text-blue-700 dark:text-blue-300';
                       return (
                         <button
                           key={tag}

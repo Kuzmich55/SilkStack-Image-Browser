@@ -391,10 +391,10 @@ const ImagePreviewSidebar: React.FC = () => {
                     const isAuto = (activeImage.autoTags || []).includes(tag);
                     const isMetadata = (activeImage.metadataTags || []).includes(tag);
                     const colors = isAuto
-                      ? 'bg-cyan-600/20 border border-cyan-500/50 text-cyan-300'
+                      ? 'bg-cyan-600/20 border border-cyan-500/50 text-cyan-700 dark:text-cyan-300'
                       : isMetadata
-                      ? 'bg-emerald-600/20 border border-emerald-500/50 text-emerald-300'
-                      : 'bg-blue-600/20 border border-blue-500/50 text-blue-300';
+                      ? 'bg-emerald-600/20 border border-emerald-500/50 text-emerald-700 dark:text-emerald-300'
+                      : 'bg-blue-600/20 border border-blue-500/50 text-blue-700 dark:text-blue-300';
                     const source = isAuto ? 'auto' : isMetadata ? 'metadata' : 'manual';
                     return (
                       <button
