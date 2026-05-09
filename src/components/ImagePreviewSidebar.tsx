@@ -397,15 +397,20 @@ const ImagePreviewSidebar: React.FC = () => {
                       : 'bg-blue-600/20 border border-blue-500/50 text-blue-700 dark:text-blue-300';
                     const source = isAuto ? 'auto' : isMetadata ? 'metadata' : 'manual';
                     return (
-                      <button
+                      <span
                         key={tag}
-                        onClick={() => handleRemoveTag(tag)}
-                        className={`flex items-center gap-1 ${colors} px-2 py-0.5 rounded-full text-xs hover:bg-red-600/20 hover:border-red-500/50 hover:text-red-300 transition-all`}
-                        title={`${tag} (${source}) — Click to remove`}
+                        className={`flex items-center gap-1 ${colors} px-2 py-0.5 rounded-full text-xs transition-all`}
+                        title={`${tag} (${source})`}
                       >
                         {tag}
-                        <X size={12} />
-                      </button>
+                        <button
+                          onClick={() => handleRemoveTag(tag)}
+                          className="hover:text-red-300 transition-colors"
+                          title="Remove tag"
+                        >
+                          <X size={12} />
+                        </button>
+                      </span>
                     );
                   })}
                 </div>
