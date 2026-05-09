@@ -102,8 +102,14 @@ export default function DirectoryList({
 
   const { folderPreferences, setFolderEmoji } = useImageStore();
 
+  const inflightRequests = useRef<Set<string>>(new Set());
+
   const loadSubfolders = useCallback(
     async (nodeKey: string, nodePath: string, rootDirectory: Directory) => {
+      // Prevent duplicate in-flight requests for the same node
+      if (inflightRequests.current.has(nodeKey)) return;
+      inflightRequests.current.add(nodeKey);
+
       try {
         setLoadingNodes((prev) => {
           const next = new Set(prev);
@@ -142,6 +148,7 @@ export default function DirectoryList({
       } catch (error) {
         console.error("Error loading subfolders:", error);
       } finally {
+        inflightRequests.current.delete(nodeKey);
         setLoadingNodes((prev) => {
           const next = new Set(prev);
           next.delete(nodeKey);
