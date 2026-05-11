@@ -624,7 +624,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
             <CheckCircle size={14} className="text-green-500/70" />
             <span>Settings saved automatically</span>
           </div>
-          <p className="text-xs text-gray-600">Some changes may require a restart</p>
         </div>
       </div>
     </div>
