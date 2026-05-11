@@ -1429,15 +1429,7 @@ const ImageModal: React.FC<ImageModalProps> = ({
           )}
 
           {(!isStandaloneWindow || isFullscreen) && (
-            <>
-              <button
-                onClick={onClose}
-                className="absolute top-4 right-4 z-[60] bg-gray-950/60 text-gray-400 hover:text-gray-50 rounded-full p-2 opacity-0 group-hover/modal:opacity-100 transition-opacity"
-                title="Close"
-              >
-                <X size={16} />
-              </button>
-              <div className="absolute top-4 right-14 flex items-center gap-2">
+            <div className="absolute top-4 right-14 flex items-center gap-2">
                 <button
                   onClick={toggleFullscreen}
                   className="bg-gray-950/60 text-gray-400 hover:text-gray-50 rounded-full p-2 opacity-0 group-hover/modal:opacity-100 transition-opacity"
@@ -1478,9 +1470,18 @@ const ImageModal: React.FC<ImageModalProps> = ({
                   )}
                 </button>
               </div>
-            </>
           )}
         </div>
+
+        {(!isStandaloneWindow || isFullscreen) && (
+          <button
+            onClick={onClose}
+            className="absolute top-4 right-4 z-[60] bg-gray-950/60 text-gray-400 hover:text-gray-50 rounded-full p-2 opacity-0 group-hover/modal:opacity-100 transition-opacity"
+            title="Close"
+          >
+            <X size={16} />
+          </button>
+        )}
 
         {/* Metadata Panel */}
         <div
