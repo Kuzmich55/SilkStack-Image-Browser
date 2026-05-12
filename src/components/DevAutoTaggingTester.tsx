@@ -78,10 +78,10 @@ export default function DevAutoTaggingTester() {
     }
   }, [handleGenerate]);
 
-  // Ctrl+Shift+D closes this window
+  // Ctrl+Shift+T closes this window
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.shiftKey && e.key === 'D') {
+      if (e.ctrlKey && e.shiftKey && e.key === 'T') {
         e.preventDefault();
         window.close();
       }
@@ -104,7 +104,7 @@ export default function DevAutoTaggingTester() {
         <button
           onClick={handleClose}
           className="px-3 py-1.5 text-xs bg-gray-700/50 border border-gray-600/50 rounded-lg text-gray-400 hover:bg-gray-600/50 hover:text-gray-200 transition-colors shrink-0"
-          title="Ctrl+Shift+D"
+          title="Ctrl+Shift+T"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
           &#8592; Close
