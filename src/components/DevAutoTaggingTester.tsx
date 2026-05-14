@@ -111,10 +111,10 @@ export default function DevAutoTaggingTester() {
     }
   }, [handleGenerate]);
 
-  // Ctrl+Shift+Y closes this window
+  // Ctrl+Y closes this window
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.shiftKey && e.key === 'Y') {
+      if (e.ctrlKey && !e.shiftKey && e.key === 'y') {
         e.preventDefault();
         window.close();
       }
@@ -145,7 +145,7 @@ export default function DevAutoTaggingTester() {
         <button
           onClick={handleClose}
           className={btnChipClass + ' shrink-0'}
-          title="Ctrl+Shift+Y"
+          title="Ctrl+Y"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
           &#8592; Close
