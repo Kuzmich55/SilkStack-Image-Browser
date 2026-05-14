@@ -1919,7 +1919,6 @@ export const useImageStore = create<ImageState>((set, get) => {
                             const current = annotations.get(imageId);
                             const existingAutoTags = current?.autoTags ?? [];
                             const mergedAutoTags = [...new Set([...existingAutoTags, ...newTags])];
-                            if (mergedAutoTags.length === existingAutoTags.length) continue;
 
                             updatedAnnotations.push({
                                 imageId,
@@ -1929,6 +1928,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                                 metadataTags: current?.metadataTags ?? [],
                                 addedAt: current?.addedAt ?? generatedAt,
                                 updatedAt: generatedAt,
+                                isAutoTagged: true,
                             });
                         }
 
@@ -1949,7 +1949,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                                 const annotation = newAnnotations.get(img.id);
                                 if (annotation) {
                                     const mergedTags = mergeAnnotationTags(annotation);
-                                    return { ...img, tags: mergedTags, autoTags: annotation.autoTags, metadataTags: annotation.metadataTags };
+                                    return { ...img, tags: mergedTags, autoTags: annotation.autoTags, metadataTags: annotation.metadataTags, isAutoTagged: annotation.isAutoTagged };
                                 }
                                 return img;
                             });
@@ -1990,12 +1990,20 @@ export const useImageStore = create<ImageState>((set, get) => {
                 }
             };
 
-            const taggingImages = filteredImages.map(img => ({
+            const taggingImages = filteredImages.filter(img => {
+                const annotation = get().annotations.get(img.id);
+                return !annotation?.isAutoTagged;
+            }).map(img => ({
                 id: img.id,
                 prompt: img.prompt,
                 models: img.models,
                 loras: img.loras,
             }));
+
+            if (taggingImages.length === 0) {
+                console.log('No new images in current view to auto-tag');
+                return;
+            }
 
             const disableAiFallback = useSettingsStore.getState().disableAiFallback;
 
@@ -2061,6 +2069,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                                 isFavorite: current?.isFavorite ?? false,
                                 tags: current?.tags ?? [],
                                 autoTags: [...existingAutoTags, ...tagsToAdd],
+                                isAutoTagged: true,
                                 metadataTags: current?.metadataTags ?? [],
                                 addedAt: current?.addedAt ?? autoTagCache.lastGenerated ?? Date.now(),
                                 updatedAt: Date.now(),
@@ -2129,6 +2138,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                 isFavorite: newIsFavorite,
                 tags: currentAnnotation?.tags ?? [],
                 autoTags: currentAnnotation?.autoTags ?? [],
+                isAutoTagged: currentAnnotation?.isAutoTagged ?? false,
                 metadataTags: currentAnnotation?.metadataTags ?? [],
                 addedAt: currentAnnotation?.addedAt ?? Date.now(),
                 updatedAt: Date.now(),
@@ -2171,6 +2181,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                     isFavorite,
                     tags: current?.tags ?? [],
                     autoTags: current?.autoTags ?? [],
+                    isAutoTagged: current?.isAutoTagged ?? false,
                     metadataTags: current?.metadataTags ?? [],
                     addedAt: current?.addedAt ?? Date.now(),
                     updatedAt: Date.now(),
@@ -2231,6 +2242,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                 isFavorite: currentAnnotation?.isFavorite ?? false,
                 tags: [...(currentAnnotation?.tags ?? []), normalizedTag],
                 autoTags: currentAnnotation?.autoTags ?? [],
+                isAutoTagged: currentAnnotation?.isAutoTagged ?? false,
                 metadataTags: currentAnnotation?.metadataTags ?? [],
                 addedAt: currentAnnotation?.addedAt ?? Date.now(),
                 updatedAt: Date.now(),
@@ -2343,6 +2355,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                     isFavorite: current?.isFavorite ?? false,
                     tags: [...(current?.tags ?? []), normalizedTag],
                     autoTags: current?.autoTags ?? [],
+                    isAutoTagged: current?.isAutoTagged ?? false,
                     metadataTags: current?.metadataTags ?? [],
                     addedAt: current?.addedAt ?? Date.now(),
                     updatedAt: Date.now(),
@@ -2496,6 +2509,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                     isFavorite: currentAnnotation?.isFavorite ?? false,
                     tags: currentAnnotation?.tags ?? [],
                     autoTags: currentAnnotation?.autoTags ?? [],
+                    isAutoTagged: currentAnnotation?.isAutoTagged ?? false,
                     metadataTags: [...existingMetadataTags, ...newTags],
                     addedAt: currentAnnotation?.addedAt ?? Date.now(),
                     updatedAt: Date.now(),
@@ -2546,12 +2560,13 @@ export const useImageStore = create<ImageState>((set, get) => {
 
             for (const [, annotation] of annotations) {
                 const autoTags = annotation.autoTags || [];
-                if (autoTags.length > 0) {
+                if (autoTags.length > 0 || annotation.isAutoTagged) {
                     updatedAnnotations.push({
                         imageId: annotation.imageId,
                         isFavorite: annotation.isFavorite,
                         tags: annotation.tags || [],
                         autoTags: [],
+                        isAutoTagged: false,
                         metadataTags: annotation.metadataTags || [],
                         addedAt: annotation.addedAt,
                         updatedAt: Date.now(),
@@ -2588,6 +2603,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                             tags: mergedTags,
                             autoTags: [],
                             metadataTags: annotation.metadataTags,
+                            isAutoTagged: false,
                         };
                     });
 

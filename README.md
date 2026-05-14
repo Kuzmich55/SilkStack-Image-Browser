@@ -19,7 +19,7 @@ It scans your folders, parses metadata from popular tools (ComfyUI, Automatic111
 - **Auto-Watch functionality** for real-time monitoring of output folders during generation.
 - **Powerful search & filters** by prompt text, model, steps, CFG, sampler, seed, etc.
 - **Smart Library** with clustering stacks and collections
-- **Auto-tags and manual tags** for faster organization and discovery
+- **Auto-tags and manual tags** for faster organization and discovery (see [Auto-Tagging Documentation](docs/AUTO-TAGGING.md))
 - **Drag & Drop to ComfyUI** - Drag and drop images to ComfyUI to automatically load the prompt and workflow.
 
 I have added a lot of new features to this project, notably:

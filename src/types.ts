@@ -950,6 +950,7 @@ export interface IndexedImage {
   isFavorite?: boolean; // Quick access to favorite status
   tags?: string[]; // All tags merged (manual + auto + metadata) for unified display
   autoTags?: string[]; // Auto-generated tags from LLM analysis
+  isAutoTagged?: boolean; // Whether the image has been processed by the auto-tagging engine
   metadataTags?: string[]; // Tags imported from image file metadata
 
   // Smart Clustering (Phase 1)
@@ -966,6 +967,7 @@ export interface ImageAnnotations {
   isFavorite: boolean; // Star/Favorite flag
   tags: string[]; // Manually-added tags (lowercase normalized)
   autoTags: string[]; // Auto-generated tags from LLM analysis
+  isAutoTagged?: boolean; // Whether the image has been processed by the auto-tagging engine
   metadataTags: string[]; // Tags imported from image file metadata
   addedAt: number; // Timestamp when first annotated
   updatedAt: number; // Timestamp of last update
