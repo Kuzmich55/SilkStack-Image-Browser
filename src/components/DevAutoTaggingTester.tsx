@@ -151,8 +151,13 @@ export default function DevAutoTaggingTester() {
           &#8592; Close
         </button>
         <div>
-          <h1 className="text-lg font-semibold text-gray-100">Auto-Tagging Test</h1>
-          <p className="text-sm text-gray-400">Llama 3.2 3B via WebLLM — local inference</p>
+          <h1 className="text-lg font-semibold text-gray-100 flex items-center gap-2">
+            Auto-Tagging Test
+            <span className="px-2 py-0.5 text-xs font-mono bg-gray-800 text-gray-400 rounded-md border border-gray-700 font-normal">
+              {TAG_GENERATION_MODEL_ID}
+            </span>
+          </h1>
+          <p className="text-sm text-gray-500">Local inference via WebLLM</p>
         </div>
         <div className="ml-auto flex items-center gap-3">
           <div className={`w-2 h-2 rounded-full ${
@@ -173,64 +178,51 @@ export default function DevAutoTaggingTester() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto scrollbar-adaptive p-6">
-        <div className="max-w-3xl mx-auto space-y-6">
+      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+        {/* Left Column (Inputs) */}
+        <div className="w-full lg:w-3/5 flex flex-col overflow-y-auto scrollbar-adaptive p-6 space-y-6 border-b lg:border-b-0 lg:border-r border-gray-800">
+          
           {/* Error */}
           {error && (
-            <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/40 rounded-lg text-sm text-red-600 dark:text-red-400">
+            <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/40 rounded-lg text-sm text-red-600 dark:text-red-400 shrink-0">
               {error}
             </div>
           )}
 
-          {/* Model Name card */}
-          <div className={cardClass}>
-            <label className={labelClass}>Model ID</label>
-            <div className="bg-gray-950 border border-gray-800 rounded-lg px-4 py-3 text-sm text-gray-300 font-mono">
-              {TAG_GENERATION_MODEL_ID}
-            </div>
-            <p className={helperClass + ' mt-2'}>
-              This model is loaded locally via WebLLM for tag generation.
-            </p>
-          </div>
-
           {/* System prompt card */}
-          <details className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden" open>
-            <summary className="px-5 py-3 cursor-pointer select-none flex items-center gap-2 text-sm font-medium text-gray-300 hover:text-gray-100 transition-colors">
-              <span className="text-xs text-gray-400">&#9654;</span>
-              System Prompt
+          <div className={`${cardClass} flex-1 flex flex-col min-h-[250px]`}>
+            <div className="flex items-center justify-between mb-3 shrink-0">
+              <label className="text-sm font-medium text-gray-200 m-0">System Prompt</label>
               {systemPromptModified && (
                 <span className="px-2 py-0.5 text-xs bg-yellow-50 dark:bg-yellow-900/40 border border-yellow-200 dark:border-yellow-700/40 rounded-full text-yellow-600 dark:text-yellow-500">
                   modified
                 </span>
               )}
-            </summary>
-            <div className="px-5 pb-4 space-y-3">
-              <textarea
-                value={systemPrompt}
-                onChange={(e) => setSystemPrompt(e.target.value)}
-                rows={3}
-                className={textareaClass + ' font-mono'}
-                placeholder="Enter system prompt..."
-              />
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => setSystemPrompt(SYSTEM_PROMPT)}
-                  disabled={!systemPromptModified}
-                  className={btnChipClass}
-                >
-                  Reset to default
-                </button>
-                <span className={helperClass}>
-                  {systemPromptModified
-                    ? 'Custom prompt will be used for generation.'
-                    : 'Edit the text above to override the default system prompt.'}
-                </span>
-              </div>
             </div>
-          </details>
+            <textarea
+              value={systemPrompt}
+              onChange={(e) => setSystemPrompt(e.target.value)}
+              className={textareaClass + ' font-mono flex-1 mb-3'}
+              placeholder="Enter system prompt..."
+            />
+            <div className="flex items-center gap-3 shrink-0">
+              <button
+                onClick={() => setSystemPrompt(SYSTEM_PROMPT)}
+                disabled={!systemPromptModified}
+                className={btnChipClass}
+              >
+                Reset to default
+              </button>
+              <span className={helperClass}>
+                {systemPromptModified
+                  ? 'Custom prompt will be used for generation.'
+                  : 'Edit the text above to override the default system prompt.'}
+              </span>
+            </div>
+          </div>
 
           {/* Input card */}
-          <div className={cardClass}>
+          <div className={`${cardClass} shrink-0`}>
             <label className={labelClass}>Prompt</label>
             <textarea
               value={prompt}
@@ -278,9 +270,12 @@ export default function DevAutoTaggingTester() {
               <span className="text-xs text-gray-400 ml-auto">Ctrl+Enter to generate</span>
             </div>
           </div>
+        </div>
 
+        {/* Right Column (Outputs) */}
+        <div className="w-full lg:w-2/5 flex flex-col overflow-y-auto scrollbar-adaptive p-6 space-y-6">
           {/* Results card */}
-          <div className={cardClass}>
+          <div className={`${cardClass} shrink-0`}>
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-medium text-gray-200">Generated Tags</h3>
               {lastTime !== null && (
@@ -306,14 +301,12 @@ export default function DevAutoTaggingTester() {
           </div>
 
           {/* Raw LLM response (debug) */}
-          {rawResponse && (
-            <div className={cardClass}>
-              <h3 className="text-sm font-medium text-gray-400 mb-2">Raw model response</h3>
-              <pre className="text-xs text-gray-400 bg-gray-950 rounded-lg p-3 overflow-x-auto scrollbar-adaptive whitespace-pre-wrap break-all font-mono">
-                {rawResponse}
-              </pre>
-            </div>
-          )}
+          <div className={`${cardClass} flex-1 flex flex-col min-h-[200px]`}>
+            <h3 className="text-sm font-medium text-gray-400 mb-2 shrink-0">Raw model response</h3>
+            <pre className="flex-1 text-xs text-gray-400 bg-gray-950 rounded-lg p-3 overflow-auto scrollbar-adaptive whitespace-pre-wrap break-all font-mono">
+              {rawResponse || (generating ? 'Generating...' : 'No response yet.')}
+            </pre>
+          </div>
         </div>
       </div>
     </div>

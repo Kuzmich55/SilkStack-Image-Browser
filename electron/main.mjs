@@ -712,10 +712,10 @@ function setupFileOperationHandlers() {
       const isDark = nativeTheme.shouldUseDarkColors;
 
       const devWindow = new BrowserWindow({
-        width: 900,
-        height: 700,
-        minWidth: 600,
-        minHeight: 400,
+        width: 1600,
+        height: 1000,
+        minWidth: 800,
+        minHeight: 600,
         backgroundColor: isDark ? '#0f1117' : '#ffffff',
         icon: getIconPath(),
         webPreferences: {
@@ -747,6 +747,7 @@ function setupFileOperationHandlers() {
       }
 
       devWindow.once("ready-to-show", () => {
+        devWindow.maximize();
         devWindow.show();
       });
 
