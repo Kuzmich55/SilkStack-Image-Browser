@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { LLMTagGenerator, TAG_GENERATION_MODEL_ID } from '@ai-images-browser/ai-intelligence';
+import { LLMTagGenerator, TAG_GENERATION_MODEL_ID, SYSTEM_PROMPT } from '@ai-images-browser/ai-intelligence';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -22,6 +22,8 @@ export default function DevAutoTaggingTester() {
   const [lastTime, setLastTime] = useState<number | null>(null);
   const [topN, setTopN] = useState(5);
   const [rawResponse, setRawResponse] = useState('');
+  const [systemPrompt, setSystemPrompt] = useState(SYSTEM_PROMPT);
+  const systemPromptModified = systemPrompt !== SYSTEM_PROMPT;
 
   const llmRef = useRef<LLMTagGenerator | null>(null);
 
@@ -58,7 +60,7 @@ export default function DevAutoTaggingTester() {
 
     const start = performance.now();
     try {
-      const result = await llm.generateTagsFromPrompt(prompt);
+      const result = await llm.generateTagsFromPrompt(prompt, systemPrompt);
       setTags(result.slice(0, topN));
       setRawResponse(llm.lastRawResponse || '(empty response)');
       setLastTime(Math.round(performance.now() - start));
@@ -70,7 +72,7 @@ export default function DevAutoTaggingTester() {
     } finally {
       setGenerating(false);
     }
-  }, [llmRef, loadState, prompt, topN]);
+  }, [llmRef, loadState, prompt, topN, systemPrompt]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.ctrlKey && e.key === 'Enter') {
@@ -190,6 +192,42 @@ export default function DevAutoTaggingTester() {
               <span className="text-xs text-gray-500 ml-auto">Ctrl+Enter to generate</span>
             </div>
           </div>
+
+          {/* System prompt card */}
+          <details className="bg-gray-800/50 rounded-xl border border-gray-700/50 overflow-hidden" open>
+            <summary className="px-5 py-3 cursor-pointer select-none flex items-center gap-2 text-sm font-medium text-gray-300 hover:text-gray-200 transition-colors">
+              <span className="text-xs text-gray-500">&#9654;</span>
+              System Prompt
+              {systemPromptModified && (
+                <span className="px-2 py-0.5 text-xs bg-yellow-900/40 border border-yellow-700/40 rounded-full text-yellow-500">
+                  modified
+                </span>
+              )}
+            </summary>
+            <div className="px-5 pb-4 space-y-3">
+              <textarea
+                value={systemPrompt}
+                onChange={(e) => setSystemPrompt(e.target.value)}
+                rows={3}
+                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30 resize-y font-mono"
+                placeholder="Enter system prompt..."
+              />
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setSystemPrompt(SYSTEM_PROMPT)}
+                  disabled={!systemPromptModified}
+                  className="px-3 py-1 text-xs bg-gray-700/50 border border-gray-600/50 rounded-lg text-gray-400 hover:bg-gray-600/50 hover:text-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                >
+                  Reset to default
+                </button>
+                <span className="text-xs text-gray-600">
+                  {systemPromptModified
+                    ? 'Custom prompt will be used for generation.'
+                    : 'Edit the text above to override the default system prompt.'}
+                </span>
+              </div>
+            </div>
+          </details>
 
           {/* Results card */}
           <div className="bg-gray-800/50 rounded-xl border border-gray-700/50 p-5">
