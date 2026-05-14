@@ -246,10 +246,10 @@ export default function App() {
     }
   }, []);
 
-  // Dev tools: Ctrl+Shift+T opens the auto-tagging tester in a new window
+  // Dev tools: Ctrl+Shift+Y opens the auto-tagging tester in a new window
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.shiftKey && e.key === 'T') {
+      if (e.ctrlKey && e.shiftKey && e.key === 'Y') {
         e.preventDefault();
         if (window.electronAPI) {
           window.electronAPI.openDevTools();

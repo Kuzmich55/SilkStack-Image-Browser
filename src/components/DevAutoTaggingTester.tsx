@@ -27,6 +27,37 @@ export default function DevAutoTaggingTester() {
 
   const llmRef = useRef<LLMTagGenerator | null>(null);
 
+  // Apply theme on mount (same pattern as ImageModalWindow)
+  useEffect(() => {
+    const applyTheme = (systemShouldUseDark: boolean) => {
+      if (systemShouldUseDark) {
+        document.documentElement.classList.add('dark');
+        document.documentElement.setAttribute('data-theme', 'dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    };
+
+    if (window.electronAPI) {
+      window.electronAPI.getTheme().then(({ shouldUseDarkColors }) => {
+        applyTheme(shouldUseDarkColors);
+      });
+
+      const unsubscribe = window.electronAPI.onThemeUpdated(
+        ({ shouldUseDarkColors }) => {
+          applyTheme(shouldUseDarkColors);
+        }
+      );
+
+      return () => {
+        if (unsubscribe) unsubscribe();
+      };
+    } else {
+      applyTheme(window.matchMedia('(prefers-color-scheme: dark)').matches);
+    }
+  }, []);
+
   // Initialize the LLM on mount
   useEffect(() => {
     const llm = new LLMTagGenerator(TAG_GENERATION_MODEL_ID, (report) => {
@@ -80,10 +111,10 @@ export default function DevAutoTaggingTester() {
     }
   }, [handleGenerate]);
 
-  // Ctrl+Shift+T closes this window
+  // Ctrl+Shift+Y closes this window
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.shiftKey && e.key === 'T') {
+      if (e.ctrlKey && e.shiftKey && e.key === 'Y') {
         e.preventDefault();
         window.close();
       }
@@ -96,23 +127,31 @@ export default function DevAutoTaggingTester() {
     window.close();
   };
 
+  // Shared class sets to keep things DRY
+  const cardClass = 'bg-gray-900 rounded-xl border border-gray-800 p-5';
+  const btnChipClass = 'px-3 py-1 text-xs bg-gray-800 border border-gray-700 rounded-lg text-gray-300 hover:bg-gray-700 hover:text-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors';
+  const btnPresetClass = 'px-3 py-1 text-xs bg-gray-800 border border-gray-700 rounded-full text-gray-300 hover:bg-gray-700 hover:text-gray-100 transition-colors';
+  const textareaClass = 'w-full bg-gray-950 border border-gray-800 rounded-lg px-4 py-3 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30 resize-y scrollbar-adaptive';
+  const labelClass = 'block text-sm font-medium text-gray-200 mb-2';
+  const helperClass = 'text-xs text-gray-400';
+
   return (
-    <div className="flex flex-col h-screen overflow-hidden bg-gray-900 text-gray-100 font-sans">
+    <div className="flex flex-col h-screen overflow-hidden bg-gray-950 text-gray-200 font-sans">
       {/* Header — draggable region (titleBarStyle: hidden needs explicit drag region) */}
       <div
-        className="px-6 py-4 border-b border-gray-800/40 flex items-center gap-4 shrink-0"
+        className="px-6 py-4 border-b border-gray-800 flex items-center gap-4 shrink-0"
         style={{ WebkitAppRegion: 'drag', paddingTop: '36px' } as React.CSSProperties}
       >
         <button
           onClick={handleClose}
-          className="px-3 py-1.5 text-xs bg-gray-700/50 border border-gray-600/50 rounded-lg text-gray-400 hover:bg-gray-600/50 hover:text-gray-200 transition-colors shrink-0"
-          title="Ctrl+Shift+T"
+          className={btnChipClass + ' shrink-0'}
+          title="Ctrl+Shift+Y"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
           &#8592; Close
         </button>
         <div>
-          <h1 className="text-lg font-semibold">Auto-Tagging Test</h1>
+          <h1 className="text-lg font-semibold text-gray-100">Auto-Tagging Test</h1>
           <p className="text-sm text-gray-400">Llama 3.2 3B via WebLLM — local inference</p>
         </div>
         <div className="ml-auto flex items-center gap-3">
@@ -134,24 +173,71 @@ export default function DevAutoTaggingTester() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto scrollbar-adaptive p-6">
         <div className="max-w-3xl mx-auto space-y-6">
           {/* Error */}
           {error && (
-            <div className="p-4 bg-red-900/20 border border-red-800/40 rounded-lg text-sm text-red-400">
+            <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/40 rounded-lg text-sm text-red-600 dark:text-red-400">
               {error}
             </div>
           )}
 
+          {/* Model Name card */}
+          <div className={cardClass}>
+            <label className={labelClass}>Model ID</label>
+            <div className="bg-gray-950 border border-gray-800 rounded-lg px-4 py-3 text-sm text-gray-300 font-mono">
+              {TAG_GENERATION_MODEL_ID}
+            </div>
+            <p className={helperClass + ' mt-2'}>
+              This model is loaded locally via WebLLM for tag generation.
+            </p>
+          </div>
+
+          {/* System prompt card */}
+          <details className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden" open>
+            <summary className="px-5 py-3 cursor-pointer select-none flex items-center gap-2 text-sm font-medium text-gray-300 hover:text-gray-100 transition-colors">
+              <span className="text-xs text-gray-400">&#9654;</span>
+              System Prompt
+              {systemPromptModified && (
+                <span className="px-2 py-0.5 text-xs bg-yellow-50 dark:bg-yellow-900/40 border border-yellow-200 dark:border-yellow-700/40 rounded-full text-yellow-600 dark:text-yellow-500">
+                  modified
+                </span>
+              )}
+            </summary>
+            <div className="px-5 pb-4 space-y-3">
+              <textarea
+                value={systemPrompt}
+                onChange={(e) => setSystemPrompt(e.target.value)}
+                rows={3}
+                className={textareaClass + ' font-mono'}
+                placeholder="Enter system prompt..."
+              />
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setSystemPrompt(SYSTEM_PROMPT)}
+                  disabled={!systemPromptModified}
+                  className={btnChipClass}
+                >
+                  Reset to default
+                </button>
+                <span className={helperClass}>
+                  {systemPromptModified
+                    ? 'Custom prompt will be used for generation.'
+                    : 'Edit the text above to override the default system prompt.'}
+                </span>
+              </div>
+            </div>
+          </details>
+
           {/* Input card */}
-          <div className="bg-gray-800/50 rounded-xl border border-gray-700/50 p-5">
-            <label className="block text-sm font-medium text-gray-200 mb-2">Prompt</label>
+          <div className={cardClass}>
+            <label className={labelClass}>Prompt</label>
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               onKeyDown={handleKeyDown}
               rows={4}
-              className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30 resize-y"
+              className={textareaClass}
               placeholder="Enter an image generation prompt..."
             />
 
@@ -161,7 +247,7 @@ export default function DevAutoTaggingTester() {
                 <button
                   key={p.label}
                   onClick={() => setPrompt(p.value)}
-                  className="px-3 py-1 text-xs bg-gray-700/50 border border-gray-600/50 rounded-full text-gray-400 hover:bg-gray-600/50 hover:text-gray-200 transition-colors"
+                  className={btnPresetClass}
                 >
                   {p.label}
                 </button>
@@ -182,71 +268,35 @@ export default function DevAutoTaggingTester() {
                 <select
                   value={topN}
                   onChange={(e) => setTopN(Number(e.target.value))}
-                  className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-blue-500"
+                  className="bg-gray-950 border border-gray-800 rounded-lg px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-blue-500"
                 >
                   {[5, 8, 10, 15].map((n) => (
                     <option key={n} value={n}>{n}</option>
                   ))}
                 </select>
               </label>
-              <span className="text-xs text-gray-500 ml-auto">Ctrl+Enter to generate</span>
+              <span className="text-xs text-gray-400 ml-auto">Ctrl+Enter to generate</span>
             </div>
           </div>
 
-          {/* System prompt card */}
-          <details className="bg-gray-800/50 rounded-xl border border-gray-700/50 overflow-hidden" open>
-            <summary className="px-5 py-3 cursor-pointer select-none flex items-center gap-2 text-sm font-medium text-gray-300 hover:text-gray-200 transition-colors">
-              <span className="text-xs text-gray-500">&#9654;</span>
-              System Prompt
-              {systemPromptModified && (
-                <span className="px-2 py-0.5 text-xs bg-yellow-900/40 border border-yellow-700/40 rounded-full text-yellow-500">
-                  modified
-                </span>
-              )}
-            </summary>
-            <div className="px-5 pb-4 space-y-3">
-              <textarea
-                value={systemPrompt}
-                onChange={(e) => setSystemPrompt(e.target.value)}
-                rows={3}
-                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30 resize-y font-mono"
-                placeholder="Enter system prompt..."
-              />
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => setSystemPrompt(SYSTEM_PROMPT)}
-                  disabled={!systemPromptModified}
-                  className="px-3 py-1 text-xs bg-gray-700/50 border border-gray-600/50 rounded-lg text-gray-400 hover:bg-gray-600/50 hover:text-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                >
-                  Reset to default
-                </button>
-                <span className="text-xs text-gray-600">
-                  {systemPromptModified
-                    ? 'Custom prompt will be used for generation.'
-                    : 'Edit the text above to override the default system prompt.'}
-                </span>
-              </div>
-            </div>
-          </details>
-
           {/* Results card */}
-          <div className="bg-gray-800/50 rounded-xl border border-gray-700/50 p-5">
+          <div className={cardClass}>
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-medium text-gray-200">Generated Tags</h3>
               {lastTime !== null && (
-                <span className="text-xs text-gray-500">{tags.length} tag(s) in {lastTime}ms</span>
+                <span className="text-xs text-gray-400">{tags.length} tag(s) in {lastTime}ms</span>
               )}
             </div>
             <div className="flex flex-wrap gap-2 min-h-[40px] items-center">
               {tags.length === 0 ? (
-                <span className="text-sm text-gray-600">
+                <span className="text-sm text-gray-500">
                   {generating ? 'Generating...' : 'Click "Generate Tags" or press Ctrl+Enter'}
                 </span>
               ) : (
                 tags.map((tag) => (
                   <span
                     key={tag}
-                    className="px-3 py-1.5 bg-gray-700/60 border border-gray-600/30 rounded-full text-sm text-gray-200"
+                    className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-full text-sm text-gray-200"
                   >
                     {tag}
                   </span>
@@ -257,9 +307,9 @@ export default function DevAutoTaggingTester() {
 
           {/* Raw LLM response (debug) */}
           {rawResponse && (
-            <div className="bg-gray-800/50 rounded-xl border border-gray-700/50 p-5">
-              <h3 className="text-sm font-medium text-gray-500 mb-2">Raw model response</h3>
-              <pre className="text-xs text-gray-400 bg-gray-900/50 rounded-lg p-3 overflow-x-auto whitespace-pre-wrap break-all font-mono">
+            <div className={cardClass}>
+              <h3 className="text-sm font-medium text-gray-400 mb-2">Raw model response</h3>
+              <pre className="text-xs text-gray-400 bg-gray-950 rounded-lg p-3 overflow-x-auto scrollbar-adaptive whitespace-pre-wrap break-all font-mono">
                 {rawResponse}
               </pre>
             </div>

@@ -750,6 +750,26 @@ function setupFileOperationHandlers() {
         devWindow.show();
       });
 
+      // Listen for theme changes and update this dev window
+      const themeHandler = () => {
+        if (!devWindow.isDestroyed()) {
+          const dark = nativeTheme.shouldUseDarkColors;
+          devWindow.setBackgroundColor(dark ? "#0f1117" : "#ffffff");
+          devWindow.setTitleBarOverlay({
+            color: dark ? '#1a1a1a' : '#f3f4f6',
+            symbolColor: dark ? '#ffffff' : '#000000',
+            height: 32,
+          });
+          devWindow.webContents.send("theme-updated", {
+            shouldUseDarkColors: dark,
+          });
+        }
+      };
+      nativeTheme.on("updated", themeHandler);
+      devWindow.on("closed", () => {
+        nativeTheme.removeListener("updated", themeHandler);
+      });
+
       return { success: true };
     } catch (err) {
       console.error("Failed to open dev tools window:", err);
