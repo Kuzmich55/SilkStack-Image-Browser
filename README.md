@@ -1,6 +1,6 @@
 # SilkStack Image Browser
 
-> _A powerful Image Browser for AI-generated images with ComfyUI metadata support, and more._
+> _A beautiful image browser built specially for viewing and organizing ComfyUI generated images._
 
 **SilkStack Image Browser** is a **local image browser and manager** focused on viewing AI-generated images.
 It scans your folders, parses metadata from popular tools (ComfyUI, Automatic1111) and lets you search, filter and organize your images by prompt, model, and more - all offline, on your machine.
