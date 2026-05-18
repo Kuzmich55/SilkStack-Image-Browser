@@ -65,6 +65,18 @@ const formatLoRA = (lora: string | LoRAInfo): string => {
   return name;
 };
 
+// Format file size: "123.4 KB", "5.2 MB", "1.8 GB"
+const formatFileSize = (bytes?: number): string | undefined => {
+  if (bytes == null || bytes <= 0) return undefined;
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  } else if (bytes < 1024 * 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  } else {
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  }
+};
+
 // Format generation time: 87ms, 1.5s, or 2m 15s
 const formatGenerationTime = (ms: number): string => {
   if (ms < 1000) return `${ms.toFixed(0)}ms`;
@@ -1690,6 +1702,10 @@ const ImageModal: React.FC<ImageModalProps> = ({
                       getAspectRatio(effectiveMetadata.width, effectiveMetadata.height) ||
                       undefined
                     }
+                  />
+                  <MetadataItem
+                    label="File Size"
+                    value={formatFileSize(image.fileSize)}
                   />
                 </div>
               </div>
