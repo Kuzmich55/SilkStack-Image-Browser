@@ -233,6 +233,7 @@ interface ImageState {
   addDirectory: (directory: Directory) => void;
   updateDirectoryStatus: (directoryId: string, isConnected: boolean) => void;
   removeDirectory: (directoryId: string) => void;
+  reorderDirectories: (orderedIds: string[]) => void;
   toggleDirectoryVisibility: (directoryId: string) => void;
   toggleAutoWatch: (directoryId: string) => void;
   initializeFolderSelection: () => Promise<void>;
@@ -1410,6 +1411,20 @@ export const useImageStore = create<ImageState>((set, get) => {
                 console.error('Failed to persist folder selection state', error);
             });
         },
+
+        reorderDirectories: (orderedIds) => set(state => {
+            const orderedDirs = orderedIds
+                .map(id => state.directories.find(d => d.id === id))
+                .filter((d): d is Directory => d !== undefined);
+            const remaining = state.directories.filter(d => !orderedIds.includes(d.id));
+            const newDirectories = [...orderedDirs, ...remaining];
+
+            if (window.electronAPI) {
+                localStorage.setItem('image-metahub-directories', JSON.stringify(newDirectories.map(d => d.path)));
+            }
+
+            return { directories: newDirectories };
+        }),
 
         setLoading: (loading) => set({ isLoading: loading }),
         setProgress: (progress) => set({ progress }),

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useSettingsStore } from '../store/useSettingsStore';
-import { X, Save, RefreshCw, CheckCircle, AlertCircle, Trash2, FolderOpen, Wrench, Palette, Keyboard, Eye, Check, Info, Github, Smile, Tag } from 'lucide-react';
+import { X, Save, RefreshCw, CheckCircle, AlertCircle, Trash2, FolderOpen, Wrench, Palette, Keyboard, Eye, Check, Info, Github, Smile, Tag, GripVertical } from 'lucide-react';
 import { resetAllCaches } from '../utils/cacheReset';
 import { HotkeySettings } from './HotkeySettings';
 import { useImageStore } from '../store/useImageStore';
@@ -56,6 +56,10 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   const excludedFolders = useImageStore((state) => state.excludedFolders);
   const removeExcludedFolder = useImageStore((state) => state.removeExcludedFolder);
   const clearAutoTags = useImageStore((state) => state.clearAutoTags);
+  const reorderDirectories = useImageStore((state) => state.reorderDirectories);
+
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
   useEffect(() => {
     const handleClickOutside = () => setActiveEmojiPicker(null);
@@ -454,10 +458,56 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                            No folders added yet
                          </div>
                        ) : (
-                         <div className="space-y-2">
-                             {directories.map(dir => (
-                              <div key={dir.id} className="flex items-center justify-between p-3 rounded-lg hover:bg-gray-800/50 group border border-transparent hover:border-gray-700/50 transition-colors bg-gray-800/30 relative">
-                                <div className="flex items-center gap-3 min-w-0 pr-4">
+                         <div className="space-y-1">
+                             {directories.map((dir, index) => (
+                              <div
+                                key={dir.id}
+                                draggable
+                                onDragStart={(e) => {
+                                  setDragIndex(index);
+                                  e.dataTransfer.effectAllowed = 'move';
+                                  e.dataTransfer.setData('text/plain', dir.id);
+                                  (e.currentTarget as HTMLElement).style.opacity = '0.4';
+                                }}
+                                onDragEnd={(e) => {
+                                  setDragIndex(null);
+                                  setDragOverIndex(null);
+                                  (e.currentTarget as HTMLElement).style.opacity = '1';
+                                }}
+                                onDragOver={(e) => {
+                                  e.preventDefault();
+                                  e.dataTransfer.dropEffect = 'move';
+                                  if (dragIndex !== null && dragIndex !== index) {
+                                    setDragOverIndex(index);
+                                  }
+                                }}
+                                onDragLeave={() => {
+                                  setDragOverIndex(null);
+                                }}
+                                onDrop={(e) => {
+                                  e.preventDefault();
+                                  if (dragIndex !== null && dragIndex !== index) {
+                                    const newOrder = [...directories.map(d => d.id)];
+                                    const [movedId] = newOrder.splice(dragIndex, 1);
+                                    newOrder.splice(index, 0, movedId);
+                                    reorderDirectories(newOrder);
+                                  }
+                                  setDragIndex(null);
+                                  setDragOverIndex(null);
+                                }}
+                                className={`flex items-center justify-between p-3 rounded-lg hover:bg-gray-800/50 group border transition-colors bg-gray-800/30 relative ${
+                                  dragOverIndex === index
+                                    ? 'border-blue-500/50 bg-blue-500/10'
+                                    : 'border-transparent hover:border-gray-700/50'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2 min-w-0 pr-2">
+                                  <div
+                                    className="p-0.5 rounded cursor-grab active:cursor-grabbing text-gray-500 hover:text-gray-300 hover:bg-gray-700/50 transition-colors shrink-0"
+                                    title="Drag to reorder"
+                                  >
+                                    <GripVertical size={16} />
+                                  </div>
                                   <div className="p-2 bg-gray-900 rounded-lg shrink-0 border border-gray-700/50">
                                     {folderPreferences.get(normalizePath(dir.path))?.emoji ? (
                                       <span className="w-4 h-4 flex items-center justify-center text-sm">
@@ -510,7 +560,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                                       renderEmojiPicker(dir.path)}
 
                                     {onRemoveFolder && (
-                                      <button 
+                                      <button
                                         onClick={() => {
                                           if (window.confirm(`Are you sure you want to remove '${dir.name}' from the library? Files will not be deleted.`)) {
                                             onRemoveFolder(dir.id);
