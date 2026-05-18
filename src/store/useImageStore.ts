@@ -1874,10 +1874,26 @@ export const useImageStore = create<ImageState>((set, get) => {
 
         // Auto-Tagging Actions (Phase 3)
         startAutoTagging: async (directoryPath, scanSubfolders, options) => {
-            const { filteredImages, autoTaggingWorker: existingWorker } = get();
+            const { filteredImages, annotations, autoTaggingWorker: existingWorker } = get();
 
             if (filteredImages.length === 0) {
                 console.log('No images in current view to auto-tag');
+                return;
+            }
+
+            // Filter to images that still need auto-tagging BEFORE creating the worker
+            const taggingImages = filteredImages.filter(img => {
+                const annotation = annotations.get(img.id);
+                return !annotation?.isAutoTagged;
+            }).map(img => ({
+                id: img.id,
+                prompt: img.prompt,
+                models: img.models,
+                loras: img.loras,
+            }));
+
+            if (taggingImages.length === 0) {
+                console.log('No new images in current view to auto-tag');
                 return;
             }
 
@@ -1893,7 +1909,7 @@ export const useImageStore = create<ImageState>((set, get) => {
             set({
                 autoTaggingWorker: worker,
                 isAutoTagging: true,
-                autoTaggingProgress: { current: 0, total: filteredImages.length, message: 'Initializing...' }
+                autoTaggingProgress: { current: 0, total: taggingImages.length, message: 'Initializing...' }
             });
 
             worker.onmessage = (e: MessageEvent) => {
@@ -1989,21 +2005,6 @@ export const useImageStore = create<ImageState>((set, get) => {
                         break;
                 }
             };
-
-            const taggingImages = filteredImages.filter(img => {
-                const annotation = get().annotations.get(img.id);
-                return !annotation?.isAutoTagged;
-            }).map(img => ({
-                id: img.id,
-                prompt: img.prompt,
-                models: img.models,
-                loras: img.loras,
-            }));
-
-            if (taggingImages.length === 0) {
-                console.log('No new images in current view to auto-tag');
-                return;
-            }
 
             const disableAiFallback = useSettingsStore.getState().disableAiFallback;
 
