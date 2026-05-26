@@ -80,6 +80,7 @@ interface SettingsState {
   comfyUILastConnectionStatus: 'unknown' | 'connected' | 'error';
 
   isSidebarCollapsed: boolean;
+  isStackingEnabled: boolean;
 
   // Actions
   setSortOrder: (order: 'asc' | 'desc' | 'date-asc' | 'date-desc' | 'random') => void;
@@ -105,6 +106,7 @@ interface SettingsState {
   setConfirmOnDelete: (value: boolean) => void;
   setDisableAiFallback: (value: boolean) => void;
   setSidebarCollapsed: (value: boolean) => void;
+  setStackingEnabled: (enabled: boolean) => void;
   resetState: () => void;
 }
 
@@ -148,6 +150,7 @@ export const useSettingsStore = create<SettingsState>()(
       comfyUILastConnectionStatus: 'unknown',
 
       isSidebarCollapsed: true,
+      isStackingEnabled: false,
 
       // Actions
       setSortOrder: (order) => set({ sortOrder: order }),
@@ -184,6 +187,7 @@ export const useSettingsStore = create<SettingsState>()(
       setConfirmOnDelete: (value) => set({ confirmOnDelete: !!value }),
       setDisableAiFallback: (value) => set({ disableAiFallback: !!value }),
       setSidebarCollapsed: (value) => set({ isSidebarCollapsed: !!value }),
+      setStackingEnabled: (enabled) => set({ isStackingEnabled: enabled }),
       updateKeybinding: (scope, action, keybinding) =>
         set((state) => ({
           keymap: {
@@ -232,6 +236,7 @@ export const useSettingsStore = create<SettingsState>()(
         confirmOnDelete: true,
         disableAiFallback: false,
         isSidebarCollapsed: true,
+        isStackingEnabled: false,
       }),
     }),
     {
@@ -267,6 +272,10 @@ export const useSettingsStore = create<SettingsState>()(
 
         if (state && typeof state.isSidebarCollapsed !== 'boolean') {
           state.isSidebarCollapsed = true;
+        }
+
+        if (state && typeof state.isStackingEnabled !== 'boolean') {
+          state.isStackingEnabled = false;
         }
       },
     }

@@ -2808,6 +2808,8 @@ export const useImageStore = create<ImageState>((set, get) => {
 
         setStackingEnabled: (enabled: boolean) => {
             set({ isStackingEnabled: enabled });
+            // Persist to settings
+            useSettingsStore.getState().setStackingEnabled(enabled);
         },
 
         setViewingStackPrompt: (prompt: string | null) => {
@@ -2821,6 +2823,18 @@ useSettingsStore.subscribe((state) => {
     const currentSortOrder = useImageStore.getState().sortOrder;
     if (state.sortOrder && state.sortOrder !== currentSortOrder) {
         useImageStore.getState().setSortOrder(state.sortOrder);
+    }
+});
+
+// Sync stacking enabled from settings changes (e.g. rehydration on app restart)
+let prevStackingEnabled: boolean | undefined = undefined;
+useSettingsStore.subscribe((state) => {
+    if (typeof state.isStackingEnabled === 'boolean' && state.isStackingEnabled !== prevStackingEnabled) {
+        prevStackingEnabled = state.isStackingEnabled;
+        const imageState = useImageStore.getState();
+        if (state.isStackingEnabled !== imageState.isStackingEnabled) {
+            imageState.setStackingEnabled(state.isStackingEnabled);
+        }
     }
 });
 

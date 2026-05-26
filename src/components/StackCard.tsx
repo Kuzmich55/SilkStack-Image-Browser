@@ -67,7 +67,7 @@ const StackCard: React.FC<StackCardProps> = ({ cluster, images, onOpen }) => {
       onClick={handleClick}
       onPointerMove={handlePointerMove}
       onPointerLeave={handlePointerLeave}
-      className="group text-left bg-gray-900/60 border border-gray-800 rounded-2xl overflow-hidden shadow-lg transition-all hover:shadow-xl hover:shadow-blue-500/20"
+      className="group text-left bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-md transition-all hover:shadow-xl hover:shadow-blue-500/10 dark:bg-gray-900/60 dark:border-gray-800 dark:shadow-lg dark:hover:shadow-blue-500/20"
       type="button"
     >
       <div className="relative aspect-[4/5] overflow-hidden">
@@ -79,18 +79,18 @@ const StackCard: React.FC<StackCardProps> = ({ cluster, images, onOpen }) => {
             loading="lazy"
           />
         ) : (
-          <div className="w-full h-full bg-gradient-to-br from-gray-800 via-gray-900 to-gray-800 flex items-center justify-center text-gray-400">
+          <div className="w-full h-full bg-gradient-to-br from-gray-100 via-gray-200 to-gray-100 flex items-center justify-center text-gray-400 dark:from-gray-800 dark:via-gray-900 dark:to-gray-800 dark:text-gray-400">
             <Layers className="w-8 h-8 opacity-70" />
           </div>
         )}
 
 
-        <div className="absolute top-3 left-3 flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 text-[11px] font-semibold text-gray-100">
+        <div className="absolute top-3 left-3 flex items-center gap-1.5 rounded-full bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-gray-100 shadow-sm backdrop-blur-sm dark:bg-black/60 dark:shadow-none">
           <Layers className="w-3.5 h-3.5" />
           {countLabel}
         </div>
         {images.length > 1 && (
-          <div className="absolute bottom-3 left-3 right-3 h-1 rounded-full bg-black/40 overflow-hidden">
+          <div className="absolute bottom-3 left-3 right-3 h-1 rounded-full bg-black/20 overflow-hidden dark:bg-black/40">
             <div
               className="h-full bg-blue-400/80 transition-all duration-100"
               style={{
@@ -102,7 +102,7 @@ const StackCard: React.FC<StackCardProps> = ({ cluster, images, onOpen }) => {
       </div>
       <div className="p-3">
         <p className="text-sm font-semibold text-gray-100 truncate">{promptLabel}</p>
-        <p className="text-xs text-gray-400 mt-1">
+        <p className="text-xs text-gray-300 mt-1">
           {detailCountLabel} | similarity {Math.round(cluster.similarityThreshold * 100)}%
         </p>
       </div>
