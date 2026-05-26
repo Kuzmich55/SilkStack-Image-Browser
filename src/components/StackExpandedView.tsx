@@ -170,6 +170,7 @@ const StackExpandedView: React.FC<StackExpandedViewProps> = ({
             images={images}
             onImageClick={handleImageClick}
             selectedImages={safeSelectedImages}
+            disableStacking
           />
         ) : (
           <ImageTable

@@ -524,9 +524,10 @@ interface ImageGridProps {
   images: IndexedImage[];
   onImageClick: (image: IndexedImage, event: React.MouseEvent) => void;
   selectedImages: Set<string>;
+  disableStacking?: boolean;
 }
 
-const ImageGrid: React.FC<ImageGridProps & { width: number; height: number }> = ({ width, height, images, onImageClick, selectedImages }) => {
+const ImageGrid: React.FC<ImageGridProps & { width: number; height: number }> = ({ width, height, images, onImageClick, selectedImages, disableStacking }) => {
   const imageSize = useSettingsStore((state) => state.viewZoomLevels.library);
   const sensitiveTags = useSettingsStore((state) => state.sensitiveTags);
   const blurSensitiveImages = useSettingsStore((state) => state.blurSensitiveImages);
@@ -603,7 +604,7 @@ const ImageGrid: React.FC<ImageGridProps & { width: number; height: number }> = 
   const prevFocusedImageIndexRef = useRef<number>(focusedImageIndex);
 
   // Layout logic
-  const itemsToRender: (IndexedImage | ImageStack)[] = isStackingEnabled ? stackedItems : images;
+  const itemsToRender: (IndexedImage | ImageStack)[] = (isStackingEnabled && !disableStacking) ? stackedItems : images;
   const focusedItemId = itemsToRender[focusedImageIndex] ? (isImageStack(itemsToRender[focusedImageIndex]) ? (itemsToRender[focusedImageIndex] as ImageStack).coverImage.id : (itemsToRender[focusedImageIndex] as IndexedImage).id) : null;
   
   const rows = useMemo(() => {
