@@ -114,6 +114,7 @@ export default function App() {
   const setError = useImageStore((state) => state.setError);
   const handleNavigateNext = useImageStore((state) => state.handleNavigateNext);
   const handleNavigatePrevious = useImageStore((state) => state.handleNavigatePrevious);
+  const clusterNavigationContext = useImageStore((state) => state.clusterNavigationContext);
   const setClusterNavigationContext = useImageStore((state) => state.setClusterNavigationContext);
   const cleanupInvalidImages = useImageStore((state) => state.cleanupInvalidImages);
   const activeView = useImageStore((state) => state.activeView);
@@ -139,6 +140,9 @@ export default function App() {
   const restoreSmartLibraryCache = useImageStore((state) => state.restoreSmartLibraryCache);
 
   const safeFilteredImages = Array.isArray(filteredImages) ? filteredImages : [];
+  const navigationImages = clusterNavigationContext && clusterNavigationContext.length > 0
+    ? clusterNavigationContext
+    : safeFilteredImages;
   const safeDirectories = Array.isArray(directories) ? directories : [];
   const safeSelectedImages = selectedImages instanceof Set ? selectedImages : new Set<string>();
 
@@ -598,8 +602,8 @@ export default function App() {
 
   const getCurrentImageIndex = useCallback(() => {
     if (!selectedImage) return 0;
-    return safeFilteredImages.findIndex(img => img.id === selectedImage.id);
-  }, [selectedImage, safeFilteredImages]);
+    return navigationImages.findIndex(img => img.id === selectedImage.id);
+  }, [selectedImage, navigationImages]);
 
   // Memoize ImageModal callbacks to prevent unnecessary re-renders during Phase B
   const handleCloseImageModal = useCallback(() => {
@@ -1012,13 +1016,13 @@ export default function App() {
           onImageDeleted={handleImageDeleted}
           onImageRenamed={handleImageRenamed}
           currentIndex={getCurrentImageIndex()}
-          totalImages={safeFilteredImages.length}
+          totalImages={navigationImages.length}
           onNavigateNext={handleImageModalNavigateNext}
           onNavigatePrevious={handleImageModalNavigatePrevious}
           directoryPath={directoryPath || ''}
           isIndexing={indexingState === 'indexing'}
-          nextImage={safeFilteredImages[(getCurrentImageIndex() + 1) % safeFilteredImages.length]}
-          previousImage={safeFilteredImages[(getCurrentImageIndex() - 1 + safeFilteredImages.length) % safeFilteredImages.length]}
+          nextImage={navigationImages[(getCurrentImageIndex() + 1) % navigationImages.length]}
+          previousImage={navigationImages[(getCurrentImageIndex() - 1 + navigationImages.length) % navigationImages.length]}
         />
       )}
 

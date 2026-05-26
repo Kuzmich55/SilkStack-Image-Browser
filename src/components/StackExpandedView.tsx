@@ -103,7 +103,35 @@ const StackExpandedView: React.FC<StackExpandedViewProps> = ({
 
       clearImageSelection();
       setClusterNavigationContext(allImages);
-      setSelectedImage(image);
+
+      if (window.electronAPI?.openImageViewer) {
+        // Electron mode: open a separate viewer window with cluster images as the navigation list
+        const directories = useImageStore.getState().directories;
+        const directory = directories.find(d => d.id === image.directoryId);
+        const directoryPath = directory?.path || '';
+
+        const imageListSnapshot = allImages.map(({ handle, thumbnailHandle, ...rest }) => rest);
+
+        setSelectedImage(image);
+        useImageStore.setState({ selectedImages: new Set([image.id]) });
+
+        window.electronAPI.openImageViewer({
+          imageId: image.id,
+          directoryPath,
+          currentIndex: clickedIndex,
+          totalImages: allImages.length,
+          imageList: imageListSnapshot,
+        }).then((result) => {
+          if (result?.success && result.windowId !== undefined) {
+            window.dispatchEvent(new CustomEvent('viewer-window-opened', { detail: { windowId: result.windowId } }));
+          }
+        }).catch(() => {
+          // Ignore errors from window opening
+        });
+      } else {
+        // Browser mode: use in-app modal
+        setSelectedImage(image);
+      }
     },
     [
       allImages,
