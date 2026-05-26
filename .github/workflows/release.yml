@@ -32,7 +32,7 @@ jobs:
           cache: 'npm'
 
       - name: Install ai-intelligence dependencies
-        run: npm ci --prefix ai-intelligence
+        run: npm install --prefix ai-intelligence
 
       - name: Install dependencies
         run: npm ci
