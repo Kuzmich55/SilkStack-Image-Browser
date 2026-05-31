@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect, useState } from 'react';
+import React, { useMemo, useEffect, useState, useRef } from 'react';
 import { Layers, Sparkles } from 'lucide-react';
 import { useImageStore } from '../store/useImageStore';
 import { useSettingsStore } from '../store/useSettingsStore';
@@ -46,6 +46,11 @@ const SmartLibrary: React.FC<SmartLibraryProps> = () => {
   const [expandedClusterId, setExpandedClusterId] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<'count' | 'similarity'>('count');
 
+  const scrollPositionRef = useRef<number>(0);
+  const gridScrollPositionRef = useRef<number>(0);
+  const sectionRef = useRef<HTMLElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
+
   const imageMap = useMemo(() => {
     return new Map(safeFilteredImages.map((image) => [image.id, image]));
   }, [safeFilteredImages]);
@@ -75,7 +80,44 @@ const SmartLibrary: React.FC<SmartLibraryProps> = () => {
     });
   }, [clusterEntries, sortBy]);
 
+  const getScrollContainer = () => {
+    if (!sectionRef.current) return null;
+    let parent = sectionRef.current.parentElement;
+    while (parent) {
+      const style = window.getComputedStyle(parent);
+      if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
+        return parent;
+      }
+      parent = parent.parentElement;
+    }
+    return null;
+  };
 
+  const handleOpenStack = (clusterId: string) => {
+    const scrollContainer = getScrollContainer();
+    if (scrollContainer) {
+      scrollPositionRef.current = scrollContainer.scrollTop;
+    }
+    if (gridRef.current) {
+      gridScrollPositionRef.current = gridRef.current.scrollTop;
+    }
+    setExpandedClusterId(clusterId);
+  };
+
+  useEffect(() => {
+    if (!expandedClusterId) {
+      const timer = setTimeout(() => {
+        const scrollContainer = getScrollContainer();
+        if (scrollContainer && scrollPositionRef.current > 0) {
+          scrollContainer.scrollTop = scrollPositionRef.current;
+        }
+        if (gridRef.current && gridScrollPositionRef.current > 0) {
+          gridRef.current.scrollTop = gridScrollPositionRef.current;
+        }
+      }, 30);
+      return () => clearTimeout(timer);
+    }
+  }, [expandedClusterId]);
 
   useEffect(() => {
     if (expandedClusterId && !clusterEntries.some((entry) => entry.cluster.id === expandedClusterId)) {
@@ -111,9 +153,9 @@ const SmartLibrary: React.FC<SmartLibraryProps> = () => {
   };
 
   return (
-    <section className="flex flex-col h-full min-h-0 pt-3">
-      <div className="flex-1 min-h-0 overflow-y-auto">
-        {activeCluster ? (
+    <section ref={sectionRef} className="flex flex-col h-full min-h-0 pt-3 relative">
+      {activeCluster && (
+        <div className="absolute inset-0 bg-gray-900 z-10 px-3 flex flex-col min-h-0">
           <StackExpandedView
             cluster={activeCluster.cluster}
             images={activeClusterImages}
@@ -124,7 +166,11 @@ const SmartLibrary: React.FC<SmartLibraryProps> = () => {
             }}
             viewMode={viewMode}
           />
-        ) : sortedEntries.length === 0 ? (
+        </div>
+      )}
+
+      {!activeCluster && sortedEntries.length === 0 && (
+        <div className="flex-1 min-h-0 overflow-y-auto">
           <div className="h-full flex flex-col items-center justify-center text-center text-gray-400">
             <div className="w-14 h-14 rounded-full bg-gray-800/60 flex items-center justify-center mb-3">
               <Layers className="w-6 h-6" />
@@ -134,7 +180,15 @@ const SmartLibrary: React.FC<SmartLibraryProps> = () => {
               Generate clusters to group similar prompts into visual stacks. This is fully virtual and does not move files.
             </p>
           </div>
-        ) : (
+        </div>
+      )}
+
+      {sortedEntries.length > 0 && (
+        <div 
+          ref={gridRef}
+          className="flex-1 min-h-0 overflow-y-auto"
+          id="smart-library-grid-container"
+        >
           <div className="min-h-0 pl-3 pr-2">
             <div 
               className="grid gap-4"
@@ -146,16 +200,14 @@ const SmartLibrary: React.FC<SmartLibraryProps> = () => {
                     key={entry.cluster.id}
                     cluster={entry.cluster}
                     images={entry.images}
-                    onOpen={() => setExpandedClusterId(entry.cluster.id)}
+                    onOpen={() => handleOpenStack(entry.cluster.id)}
                   />
                 );
               })}
             </div>
-
-
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       <Footer
         viewMode={viewMode}

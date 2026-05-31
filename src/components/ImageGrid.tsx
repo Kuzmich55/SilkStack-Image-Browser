@@ -550,6 +550,11 @@ const ImageGrid: React.FC<ImageGridProps & { width: number; height: number }> = 
   const setStackingEnabled = useImageStore((state) => state.setStackingEnabled);
   const setViewingStackPrompt = useImageStore((state) => state.setViewingStackPrompt);
   const setSearchQuery = useImageStore((state) => state.setSearchQuery);
+  const viewingStackPrompt = useImageStore((state) => state.viewingStackPrompt);
+  const mainLibraryScrollPositionRef = useRef<number>(0);
+  const pendingRestoreStackScrollRef = useRef<boolean>(false);
+  const prevViewingStackPromptRef = useRef<string | null>(null);
+
   const { stackedItems } = useImageStacking(images, isStackingEnabled);
   const gridRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -561,6 +566,7 @@ const ImageGrid: React.FC<ImageGridProps & { width: number; height: number }> = 
   // Resize anchor tracking
   const rowsRef = useRef<any[]>([]);
   const resizeAnchorRef = useRef<{ id: string, offsetRatio: number } | null>(null);
+
 
   // Handle scroll event
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
@@ -613,6 +619,70 @@ const ImageGrid: React.FC<ImageGridProps & { width: number; height: number }> = 
       const availableWidth = Math.max(1, safeWidth - 36); 
       return computeJustifiedLayout(itemsToRender, availableWidth, imageSize);
   }, [itemsToRender, width, imageSize]);
+
+  React.useLayoutEffect(() => {
+    if (prevViewingStackPromptRef.current !== null && viewingStackPrompt === null) {
+      pendingRestoreStackScrollRef.current = true;
+    }
+    prevViewingStackPromptRef.current = viewingStackPrompt;
+  }, [viewingStackPrompt]);
+
+  React.useLayoutEffect(() => {
+    if (pendingRestoreStackScrollRef.current && gridRef.current) {
+      if (rows.length > 0 || itemsToRender.length === 0) {
+        const savedPos = mainLibraryScrollPositionRef.current;
+        
+        // Reset the virtualized list cache completely from index 0
+        // to ensure perfect, pixel-precise height and offset calculations
+        if (listRef.current) {
+          listRef.current.resetAfterIndex(0, true);
+        }
+        
+        requestAnimationFrame(() => {
+          if (gridRef.current) {
+            gridRef.current.scrollTo({ top: savedPos, behavior: 'instant' });
+            scrollStateRef.current.top = savedPos;
+          }
+        });
+        pendingRestoreStackScrollRef.current = false;
+      }
+    }
+  }, [viewingStackPrompt, rows.length, itemsToRender.length]);
+
+  // Dynamic Scroll Anchoring to keep the viewport stable when row heights change (due to lazy loading / dimension updates)
+  React.useLayoutEffect(() => {
+    if (gridRef.current && resizeAnchorRef.current && pendingRestoreKeyRef.current === null && !pendingRestoreStackScrollRef.current) {
+      let currentY = 0;
+      let found = false;
+      let foundY = 0;
+      let foundRowHeight = 0;
+
+      for (const row of rows) {
+        for (const item of row.items) {
+          const itemId = 'coverImage' in item ? item.coverImage.id : item.id;
+          if (itemId === resizeAnchorRef.current.id) {
+            found = true;
+            foundY = currentY;
+            foundRowHeight = row.height;
+            break;
+          }
+        }
+        if (found) break;
+        currentY += row.height + 8;
+      }
+
+      if (found) {
+        const targetScrollTop = Math.round(foundY + (resizeAnchorRef.current.offsetRatio * foundRowHeight));
+        const currentScrollTop = Math.round(gridRef.current.scrollTop);
+        
+        // Synchronously adjust the scroll position to anchor the visually visible item perfectly
+        if (Math.abs(targetScrollTop - currentScrollTop) > 1) {
+          gridRef.current.scrollTop = targetScrollTop;
+          scrollStateRef.current.top = targetScrollTop;
+        }
+      }
+    }
+  }, [rows]);
 
   const prevRowsRef = useRef<LayoutRow[]>([]);
   // Update rowsRef for the scroll handler and reset cache smartly
@@ -1222,6 +1292,11 @@ const ImageGrid: React.FC<ImageGridProps & { width: number; height: number }> = 
   // Handle drill-down
 
   const handleStackClick = React.useCallback((stack: ImageStack) => {
+    // Save current scroll position of the grid before entering the stack
+    if (gridRef.current) {
+      mainLibraryScrollPositionRef.current = gridRef.current.scrollTop;
+    }
+
     // Set search query to the prompt of the stack
     const prompt = stack.coverImage.metadata?.normalizedMetadata?.prompt || stack.coverImage.metadata?.positive_prompt;
     if (prompt) {
@@ -1229,7 +1304,7 @@ const ImageGrid: React.FC<ImageGridProps & { width: number; height: number }> = 
         setStackingEnabled(false); // Disable stacking when drilling down to see individual items
         setViewingStackPrompt(prompt); // Enable "Back to Stacks" mode
     }
-  }, [setStackingEnabled, setViewingStackPrompt]);
+  }, [setSearchQuery, setStackingEnabled, setViewingStackPrompt]);
 
   // Use itemsToRender for calculations
   const isEmpty = itemsToRender.length === 0;
