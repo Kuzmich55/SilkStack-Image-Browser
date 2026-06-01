@@ -138,6 +138,8 @@ export default function App() {
   const reshuffle = useImageStore((state) => state.reshuffle);
   const updateDirectoryStatus = useImageStore((state) => state.updateDirectoryStatus);
   const restoreSmartLibraryCache = useImageStore((state) => state.restoreSmartLibraryCache);
+  const syncNewImagesToStacks = useImageStore((state) => state.syncNewImagesToStacks);
+  const handleStackImageDeletion = useImageStore((state) => state.handleStackImageDeletion);
 
   const safeFilteredImages = Array.isArray(filteredImages) ? filteredImages : [];
   const navigationImages = clusterNavigationContext && clusterNavigationContext.length > 0
@@ -210,15 +212,24 @@ export default function App() {
     }
   }, [safeFilteredImages.length, totalImagesCount, safeDirectories.length, hasImages, indexingState]);
 
-  // Restore auto-tags from cache after images are loaded
-  // This runs early so tags are visible without needing to open Smart Library first
+  // Restore auto-tags from cache after images are loaded.
+  // Stack data is stored per-image in IndexedDB (via ImageAnnotations) and restored
+  // automatically by loadAnnotations — no separate cache file needed.
   useEffect(() => {
     if (primaryPath && hasImages && indexingState !== 'indexing') {
       restoreSmartLibraryCache(primaryPath, scanSubfolders);
     }
   }, [primaryPath, hasImages, indexingState, scanSubfolders, restoreSmartLibraryCache]);
 
-
+  // After indexing completes, sync new images to persistent library stacks
+  const prevIndexingStateRef = useRef(indexingState);
+  useEffect(() => {
+    const justCompleted = prevIndexingStateRef.current === 'indexing' && indexingState === 'completed';
+    prevIndexingStateRef.current = indexingState;
+    if (justCompleted) {
+      syncNewImagesToStacks();
+    }
+  }, [indexingState, syncNewImagesToStacks]);
 
   // --- Effects ---
   useEffect(() => {
@@ -396,6 +407,9 @@ export default function App() {
 
       // Processar novos arquivos usando a função do useImageLoader
       await processNewWatchedFiles(directory, files);
+
+      // Sync new images into persistent library stacks
+      useImageStore.getState().syncNewImagesToStacks();
     });
 
     return () => unsubscribe();
@@ -414,6 +428,22 @@ export default function App() {
 
       // Process deleted files using the function from useImageLoader
       await processDeletedWatchedFiles(directory, paths);
+
+      // Clean up deleted images from persistent library stacks
+      const deletedImageIds = paths.map(filePath => {
+        const normalizedFilePath = normalizePath(filePath);
+        const normalizedRootPath = normalizePath(directory.path);
+        let relativePath = normalizedFilePath;
+        if (normalizedRootPath && normalizedFilePath !== normalizedRootPath) {
+          const prefix = `${normalizedRootPath}/`;
+          if (normalizedFilePath.startsWith(prefix)) {
+            relativePath = normalizedFilePath.slice(prefix.length);
+          }
+        }
+        const fileName = filePath.split(/[\\/]/).pop() || filePath;
+        return `${directory.id}::${relativePath || fileName}`;
+      });
+      useImageStore.getState().handleStackImageDeletion(deletedImageIds);
     });
 
     return () => unsubscribe();

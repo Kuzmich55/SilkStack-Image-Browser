@@ -292,6 +292,8 @@ interface ImageState {
   setScanSubfolders: (scan: boolean) => void;
   setFocusedImageIndex: (index: number | null) => void;
   setLibraryStackContext: (context: LibraryStackContext | null) => void;
+  syncNewImagesToStacks: () => Promise<void>;
+  handleStackImageDeletion: (deletedImageIds: string[]) => void;
   setFullscreenMode: (isFullscreen: boolean) => void;
 
   // Clustering Actions (Phase 2)
@@ -665,8 +667,10 @@ export const useImageStore = create<ImageState>((set, get) => {
                 const isFavoriteChanged = img.isFavorite !== annotation.isFavorite;
                 const mergedTags = mergeAnnotationTags(annotation);
                 const tagsChanged = JSON.stringify(img.tags || []) !== JSON.stringify(mergedTags);
+                const stackChanged = img.stackGroupId !== annotation.stackGroupId
+                    || img.isStackAnalyzed !== annotation.isStackAnalyzed;
 
-                if (isFavoriteChanged || tagsChanged) {
+                if (isFavoriteChanged || tagsChanged || stackChanged) {
                     hasChanges = true;
                     return {
                         ...img,
@@ -674,6 +678,8 @@ export const useImageStore = create<ImageState>((set, get) => {
                         tags: mergedTags,
                         autoTags: annotation.autoTags || [],
                         metadataTags: annotation.metadataTags || [],
+                        stackGroupId: annotation.stackGroupId,
+                        isStackAnalyzed: annotation.isStackAnalyzed,
                     };
                 }
             }
@@ -2819,6 +2825,119 @@ export const useImageStore = create<ImageState>((set, get) => {
 
         setLibraryStackContext: (context: LibraryStackContext | null) => {
             set(state => ({ ...filterAndSort({ ...state, libraryStackContext: context }), libraryStackContext: context }));
+        },
+
+        syncNewImagesToStacks: async () => {
+            const state = get();
+            const { images, annotations } = state;
+
+            // Prevent concurrent runs
+            if ((state as any).__syncInProgress) return;
+            (state as any).__syncInProgress = true;
+
+            try {
+                const { normalizePrompt, generatePromptHash } = await import('../utils/similarityMetrics');
+                const { bulkSaveAnnotations } = await import('../services/imageAnnotationsStorage');
+
+                const now = Date.now();
+                const updatedAnnotations: ImageAnnotations[] = [];
+                const newAnnotations = new Map(annotations);
+
+                for (const image of images) {
+                    const existing = annotations.get(image.id);
+
+                    // Skip already-analyzed images (same pattern as isAutoTagged)
+                    if (existing?.isStackAnalyzed) continue;
+
+                    const prompt = image.prompt
+                        || image.metadata?.normalizedMetadata?.prompt
+                        || image.metadata?.positive_prompt;
+
+                    const stackGroupId = prompt && prompt.trim()
+                        ? generatePromptHash(prompt)
+                        : undefined;
+
+                    const updated: ImageAnnotations = {
+                        imageId: image.id,
+                        isFavorite: existing?.isFavorite ?? false,
+                        tags: existing?.tags ?? [],
+                        autoTags: existing?.autoTags ?? [],
+                        metadataTags: existing?.metadataTags ?? [],
+                        isAutoTagged: existing?.isAutoTagged,
+                        // New stack fields
+                        stackGroupId,
+                        isStackAnalyzed: true,
+                        addedAt: existing?.addedAt ?? now,
+                        updatedAt: now,
+                    };
+
+                    updatedAnnotations.push(updated);
+                    newAnnotations.set(image.id, updated);
+                }
+
+                if (updatedAnnotations.length > 0) {
+                    // Persist to IndexedDB (same path as auto-tags)
+                    await bulkSaveAnnotations(updatedAnnotations);
+
+                    // Update in-memory state
+                    const imagesWithAnnotations = applyAnnotationsToImages(images, newAnnotations);
+                    const filteredResult = filterAndSort({ ...state, images: imagesWithAnnotations, annotations: newAnnotations });
+                    const availableFilters = recalculateAvailableFilters(filteredResult.filteredImages);
+
+                    set({
+                        ...filteredResult,
+                        ...availableFilters,
+                        images: imagesWithAnnotations,
+                        annotations: newAnnotations,
+                    });
+
+                    console.log(`Stack analysis complete: ${updatedAnnotations.length} images analyzed`);
+                }
+            } catch (error) {
+                console.error('Failed to sync new images to stacks:', error);
+            } finally {
+                (state as any).__syncInProgress = false;
+            }
+        },
+
+        handleStackImageDeletion: (deletedImageIds: string[]) => {
+            const { annotations } = get();
+            const deletedSet = new Set(deletedImageIds);
+
+            // Build updated annotations: clear stackGroupId for deleted images
+            const updatedList: ImageAnnotations[] = [];
+            const newAnnotations = new Map(annotations);
+
+            for (const [imageId, annotation] of annotations) {
+                if (deletedSet.has(imageId) && (annotation.stackGroupId || annotation.isStackAnalyzed)) {
+                    const updated = {
+                        ...annotation,
+                        stackGroupId: undefined,
+                        isStackAnalyzed: false,
+                        updatedAt: Date.now(),
+                    };
+                    updatedList.push(updated);
+                    newAnnotations.set(imageId, updated);
+                }
+            }
+
+            if (updatedList.length > 0) {
+                import('../services/imageAnnotationsStorage').then(({ bulkSaveAnnotations }) => {
+                    bulkSaveAnnotations(updatedList);
+                }).catch(() => {});
+
+                const state = get();
+                const imagesWithAnnotations = applyAnnotationsToImages(state.images, newAnnotations);
+                const filteredResult = filterAndSort({ ...state, images: imagesWithAnnotations, annotations: newAnnotations });
+                const availableFilters = recalculateAvailableFilters(filteredResult.filteredImages);
+
+                set({
+                    ...filteredResult,
+                    ...availableFilters,
+                    images: imagesWithAnnotations,
+                    annotations: newAnnotations,
+                });
+            }
         },
     };
 });

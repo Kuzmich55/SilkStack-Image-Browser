@@ -952,6 +952,8 @@ export interface IndexedImage {
   autoTags?: string[]; // Auto-generated tags from LLM analysis
   isAutoTagged?: boolean; // Whether the image has been processed by the auto-tagging engine
   metadataTags?: string[]; // Tags imported from image file metadata
+  stackGroupId?: string; // Prompt hash — groups images with identical prompts into stacks
+  isStackAnalyzed?: boolean; // Whether the image has been checked for stack membership
 
   // Smart Clustering (Phase 1)
   clusterId?: string; // Cluster this image belongs to
@@ -969,6 +971,8 @@ export interface ImageAnnotations {
   autoTags: string[]; // Auto-generated tags from LLM analysis
   isAutoTagged?: boolean; // Whether the image has been processed by the auto-tagging engine
   metadataTags: string[]; // Tags imported from image file metadata
+  stackGroupId?: string; // Prompt hash — groups images with identical prompts into stacks
+  isStackAnalyzed?: boolean; // Whether the image has been checked for stack membership
   addedAt: number; // Timestamp when first annotated
   updatedAt: number; // Timestamp of last update
 }

@@ -1,6 +1,6 @@
 # Image Stacking in SilkStack
 
-SilkStack provides two complementary systems for grouping similar images: **Library Stacks** (instant, exact-match) and **Smart Library Clusters** (AI-powered, similarity-based). This document covers their architecture, behavior, and extension points.
+SilkStack provides two complementary systems for grouping similar images: **Library Stacks** (exact prompt match, per-image annotation persistence) and **Smart Library Clusters** (AI-powered similarity, separate file cache). This document covers their architecture, behavior, and extension points.
 
 ---
 
@@ -8,7 +8,10 @@ SilkStack provides two complementary systems for grouping similar images: **Libr
 
 - [Overview](#overview)
 - [Library Stacks](#library-stacks)
-  - [Grouping Algorithm](#grouping-algorithm)
+  - [Grouping Strategy (Two-Path)](#grouping-strategy-two-path)
+  - [Per-Image Annotation Fields](#per-image-annotation-fields)
+  - [Stack Analysis Flow](#stack-analysis-flow)
+  - [Store Actions](#store-actions)
   - [Stack Drill-Down](#stack-drill-down)
   - [LibraryStackContext](#librarystackcontext)
   - [Filter Pipeline Integration](#filter-pipeline-integration)
@@ -21,7 +24,6 @@ SilkStack provides two complementary systems for grouping similar images: **Libr
 - [Future Extension Points](#future-extension-points)
   - [Manual Image Addition to Stacks](#manual-image-addition-to-stacks)
   - [Similarity-Based Stacking in Library](#similarity-based-stacking-in-library)
-  - [Persistent Stacks](#persistent-stacks)
 
 ---
 
@@ -30,11 +32,12 @@ SilkStack provides two complementary systems for grouping similar images: **Libr
 | Feature | Library Stacks | Smart Library Clusters |
 |---|---|---|
 | **Where** | Main library grid | Smart Library view |
-| **Grouping method** | Exact prompt match (hash) | 4-phase similarity algorithm |
+| **Grouping method** | Exact prompt hash (FNV-1a) | 4-phase similarity algorithm |
 | **Performance** | O(n) — `useMemo` per render | O(n²) within buckets — Web Worker |
-| **Persistence** | None (computed each render) | Cached to disk via `clusterCacheManager` |
+| **Persistence** | IndexedDB per-image annotations | JSON file cache via `clusterCacheManager` |
+| **Persistence pattern** | Same as auto-tags (`ImageAnnotations`) | Separate `{hash}-clusters.json` file |
 | **Drill-down** | In-grid via `LibraryStackContext` | Overlay via `StackExpandedView` |
-| **Membership model** | Implicit (same normalized prompt) | Explicit (`imageIds: string[]`) |
+| **Membership model** | `stackGroupId` per image (prompt hash) | Explicit `imageIds: string[]` per cluster |
 | **Threshold** | Exact match only | Configurable (default 0.88) |
 | **Minimum size** | 2 images | 3 images |
 
@@ -42,30 +45,98 @@ SilkStack provides two complementary systems for grouping similar images: **Libr
 
 ## Library Stacks
 
-Library stacks are the default grouping behavior in the main grid. When stacking is enabled, images sharing the same **positive prompt** (normalized) are visually grouped into a stacked card with a `+N` badge.
+Library stacks are the default grouping behavior in the main grid. When stacking is enabled, images with the same prompt hash are visually grouped into a stacked card with a `+N` badge.
 
-### Grouping Algorithm
+Unlike the previous ephemeral design, stack membership now follows the **same per-image annotation pattern as auto-tags**: each image's `ImageAnnotations` record in IndexedDB stores a `stackGroupId` (prompt hash) and an `isStackAnalyzed` flag. This means stack data survives app restarts without a separate cache file.
+
+### Grouping Strategy (Two-Path)
 
 **File:** [`src/hooks/useImageStacking.ts`](../src/hooks/useImageStacking.ts)
 
+The hook uses an automatic two-strategy approach:
+
 ```
-images → normalize prompt → group by key → sort groups → output (images + stacks)
+images → any image have stackGroupId?
+  ├─ YES → groupByStackAnnotation()  → group by img.stackGroupId (persisted, fast)
+  └─ NO  → groupByExactPrompt()      → group by normalized prompt text (fallback)
+                │
+                ▼
+            sortItems() → output (images + stacks)
 ```
 
-1. **Normalization** (line 23–29): Each image's positive prompt is lowercased, whitespace-collapsed, and trimmed. Negative prompts are ignored to prevent splits.
-2. **Grouping** (line 40–53): A `Map<string, IndexedImage[]>` buckets images by normalized prompt key. Images without a prompt go into a separate `noPromptImages` array.
-3. **Stack creation** (line 59–76): Groups with 2+ images become `ImageStack` objects. Singletons remain as bare `IndexedImage` entries.
-4. **Sorting** (line 87–131): The combined list (stacks + singles) is sorted by the current sort order (`date-desc`, `name-asc`, etc.), with optional starred-first priority.
+**Path 1 — Annotation-based** (`groupByStackAnnotation`): Groups images by their `stackGroupId` field. This field is set by `syncNewImagesToStacks` and persisted in IndexedDB. Images sharing the same `stackGroupId` form a stack. Images without a `stackGroupId` appear as singletons.
 
-**Key types** ([`src/types.ts`](../src/types.ts)):
+**Path 2 — Exact prompt fallback** (`groupByExactPrompt`): Normalizes each image's positive prompt (lowercase, whitespace collapse, trim) and groups by normalized text. This is the original algorithm, now used only when no images have `stackGroupId` set (fresh install, or before first indexing cycle runs `syncNewImagesToStacks`).
+
+Both paths produce the same grouping for exact prompt matches. The annotation path is preferred once available because:
+- It avoids re-computing prompt hashes on every render
+- Group membership is consistent across sessions
+- Only new (unanalyzed) images are processed incrementally
+
+### Per-Image Annotation Fields
+
+**File:** [`src/types.ts`](../src/types.ts)
+
 ```typescript
-interface ImageStack {
-  id: string;              // "stack-" + coverImage.id
-  coverImage: IndexedImage; // Most recent image
-  images: IndexedImage[];   // All images in the stack, sorted by date desc
-  count: number;            // Total images
+// On ImageAnnotations (persisted in IndexedDB):
+interface ImageAnnotations {
+  // ... existing fields (isFavorite, tags, autoTags, isAutoTagged, metadataTags) ...
+  stackGroupId?: string;    // Prompt hash — groups images with identical prompts
+  isStackAnalyzed?: boolean; // Whether the image has been checked for stack membership
+}
+
+// Denormalized onto IndexedImage by applyAnnotationsToImages():
+interface IndexedImage {
+  // ... existing fields ...
+  stackGroupId?: string;
+  isStackAnalyzed?: boolean;
 }
 ```
+
+These fields follow the exact same pattern as `isAutoTagged` / `autoTags`:
+- Stored in the `imageAnnotations` IndexedDB store (one record per `imageId`)
+- Loaded on app start by `loadAnnotations()`
+- Denormalized onto `IndexedImage` objects by `applyAnnotationsToImages()` in the store
+- Written via `bulkSaveAnnotations()` for batch persistence
+
+### Stack Analysis Flow
+
+**Triggered by:** indexing completion, file watcher new-image events.
+
+```
+syncNewImagesToStacks()
+  │
+  ├─ 1. Iterate state.images, skip where annotations.isStackAnalyzed === true
+  │
+  ├─ 2. For each unanalyzed image:
+  │     prompt = image.prompt || metadata.positive_prompt
+  │     stackGroupId = generatePromptHash(normalizePrompt(prompt))
+  │
+  ├─ 3. Build ImageAnnotations[] with:
+  │     { imageId, stackGroupId, isStackAnalyzed: true, ...existingFields }
+  │
+  ├─ 4. bulkSaveAnnotations(updatedAnnotations) → IndexedDB
+  │
+  └─ 5. Update in-memory annotations Map, re-apply to images, re-run filterAndSort
+```
+
+**Key design point:** `isStackAnalyzed` is set to `true` even for images without a prompt (their `stackGroupId` stays `undefined`). This prevents them from being re-checked on every indexing cycle — same as `isAutoTagged` prevents re-tagging.
+
+**Deletion cleanup** (`handleStackImageDeletion`):
+- Clears `stackGroupId` and sets `isStackAnalyzed: false` for deleted images
+- Saved via `bulkSaveAnnotations`
+- This means re-added files will be re-analyzed
+
+### Store Actions
+
+**File:** [`src/store/useImageStore.ts`](../src/store/useImageStore.ts)
+
+| Action | Trigger | Behavior |
+|---|---|---|
+| `syncNewImagesToStacks()` | Indexing completes, file watcher (new files) | Finds unanalyzed images, assigns `stackGroupId`, persists via `bulkSaveAnnotations` |
+| `handleStackImageDeletion(ids)` | File watcher (deleted files) | Clears `stackGroupId` + `isStackAnalyzed` from annotations, saves |
+
+There is no separate `libraryStacks` array or `stackAnalyzedImageIds` Set in the store. Stack membership is derived from the `annotations` Map (same source as favorites, tags, and auto-tags).
 
 ### Stack Drill-Down
 
@@ -89,7 +160,7 @@ The key design decision: **drill-down uses ID-based filtering, not text-based fi
 
 ### LibraryStackContext
 
-**File:** [`src/types.ts`](../src/types.ts#L1136-L1142)
+**File:** [`src/types.ts`](../src/types.ts)
 
 ```typescript
 interface LibraryStackContext {
@@ -112,7 +183,7 @@ interface LibraryStackContext {
 
 ### Filter Pipeline Integration
 
-**File:** [`src/store/useImageStore.ts`](../src/store/useImageStore.ts), function `filterAndSort` (line ~737)
+**File:** [`src/store/useImageStore.ts`](../src/store/useImageStore.ts), function `filterAndSort`
 
 The filter pipeline applies these stages in order:
 
@@ -120,7 +191,7 @@ The filter pipeline applies these stages in order:
 selectionFiltered → favorites → sensitive tags → ID-BASED OR TEXT SEARCH → models → loras → schedulers → advanced filters → sort
 ```
 
-**ID-based filtering** (line ~834):
+**ID-based filtering:**
 ```typescript
 if (libraryStackContext) {
     const contextImageIds = new Set(libraryStackContext.imageIds);
@@ -132,15 +203,13 @@ if (libraryStackContext) {
 
 The `if/else if` structure means **ID-based filtering takes priority over text search.** When a stack is open, the grid shows exactly the images in `imageIds`. When the context is cleared, any active `searchQuery` resumes filtering normally.
 
-The `isFilteringActive` helper also checks `libraryStackContext` so that filter-active UI indicators show correctly while in stack view.
-
 ### Scroll Position Preservation
 
 When drilling into a stack and returning, the grid scroll position is saved and restored:
 
-1. **On enter** ([`ImageGrid.tsx:1296`](../src/components/ImageGrid.tsx#L1296)): `mainLibraryScrollPositionRef.current` captures the grid's `scrollTop`
-2. **On exit detection** ([`ImageGrid.tsx:623`](../src/components/ImageGrid.tsx#L623)): A `useLayoutEffect` watches for `libraryStackContext` transitioning from non-null → null and sets a pending restore flag
-3. **On restore** ([`ImageGrid.tsx:630`](../src/components/ImageGrid.tsx#L630)): A second `useLayoutEffect` resets the virtualized list cache and scrolls to the saved position
+1. **On enter** ([`ImageGrid.tsx`](../src/components/ImageGrid.tsx)): `mainLibraryScrollPositionRef.current` captures the grid's `scrollTop`
+2. **On exit detection**: A `useLayoutEffect` watches for `libraryStackContext` transitioning from non-null → null and sets a pending restore flag
+3. **On restore**: A second `useLayoutEffect` resets the virtualized list cache and scrolls to the saved position
 
 ---
 
@@ -186,8 +255,8 @@ interface ImageCluster {
 ```
 
 **Utilities** ([`src/utils/similarityMetrics.ts`](../src/utils/similarityMetrics.ts)):
-- `normalizePrompt(text)` — whitespace collapse, lowercase, trim
-- `generatePromptHash(text)` — deterministic hash for exact-match grouping
+- `normalizePrompt(text)` — whitespace collapse, lowercase, trim, strip LoRA tags and metadata
+- `generatePromptHash(text)` — FNV-1a hash for exact-match grouping
 - `hybridSimilarity(a, b)` — Jaccard × 0.6 + Levenshtein × 0.4
 - `tokenizeForSimilarity(text)` — splits into word tokens
 - `extractKeywords(text, maxCount)` — top N keywords by frequency
@@ -195,7 +264,7 @@ interface ImageCluster {
 - `normalizedLevenshtein(a, b)` — edit distance normalized to [0,1]
 
 **Persistence** ([`src/services/clusterCacheManager.ts`](../src/services/clusterCacheManager.ts)):
-Clusters are cached to disk with atomic writes for crash safety. The cache is keyed by directory path + subfolder setting. On app start, `restoreSmartLibraryCache()` loads cached clusters while the user navigates.
+Clusters are cached to disk as JSON files at `{userData}/smart-library-cache/{hash}-clusters.json` with atomic writes (temp file + rename) for crash safety. The cache is keyed by directory path + subfolder setting. On app start, `restoreSmartLibraryCache()` loads cached clusters.
 
 **Incremental updates:**
 - `addImageToClusters(image, existingClusters, threshold)` — classifies a new image into an existing cluster or creates a new one
@@ -220,15 +289,16 @@ Unlike library stacks, cluster drill-down uses **local component state** and an 
 | Aspect | Library Stacks | Smart Library Clusters |
 |---|---|---|
 | **Trigger** | Toggle in grid toolbar | "Generate Clusters" button |
-| **Speed** | Instant (no computation) | 4-phase worker, ~30s for 35k images |
-| **Grouping** | Exact normalized prompt | Similarity threshold 0.88 |
+| **Speed** | Instant (annotation lookup or exact match) | 4-phase worker, ~30s for 35k images |
+| **Grouping** | Exact prompt hash | Similarity threshold 0.88 |
 | **Drill-down mechanism** | `LibraryStackContext` in store | `expandedClusterId` local state |
 | **Filtering** | ID-based Set lookup | Explicit image array prop |
 | **Search bar** | Preserved | N/A (separate view) |
 | **Scroll restore** | `useLayoutEffect` watching context | `setTimeout` 30ms + ref |
 | **Navigation context** | Not supported | `clusterNavigationContext` for prev/next |
-| **Manual editing** | Possible via `imageIds` mutation | Not yet supported |
-| **Persistence** | None (recomputed) | Disk cache via `clusterCacheManager` |
+| **Manual editing** | Possible via annotation mutation | Not yet supported |
+| **Persistence** | IndexedDB per-image (`ImageAnnotations`) | JSON file cache (`clusterCacheManager`) |
+| **Processing flag** | `isStackAnalyzed` per annotation | N/A (full re-run on each generation) |
 | **Min group size** | 2 | 3 (configurable in `SmartLibrary.tsx`) |
 
 ---
@@ -237,15 +307,16 @@ Unlike library stacks, cluster drill-down uses **local component state** and an 
 
 | File | Role |
 |---|---|
-| [`src/types.ts`](../src/types.ts) | `ImageStack`, `LibraryStackContext`, `ImageCluster` interfaces |
-| [`src/hooks/useImageStacking.ts`](../src/hooks/useImageStacking.ts) | Library stack grouping logic |
-| [`src/store/useImageStore.ts`](../src/store/useImageStore.ts) | `libraryStackContext` state, `filterAndSort` pipeline, `setLibraryStackContext` action |
+| [`src/types.ts`](../src/types.ts) | `ImageStack`, `LibraryStackContext`, `ImageCluster`, `ImageAnnotations` (with `stackGroupId`/`isStackAnalyzed`) |
+| [`src/hooks/useImageStacking.ts`](../src/hooks/useImageStacking.ts) | Two-path grouping: annotation-based + exact prompt fallback, `sortItems` shared sort |
+| [`src/store/useImageStore.ts`](../src/store/useImageStore.ts) | `libraryStackContext` state, `syncNewImagesToStacks`, `handleStackImageDeletion`, `applyAnnotationsToImages` (denormalizes `stackGroupId`), `filterAndSort` pipeline |
 | [`src/components/ImageGrid.tsx`](../src/components/ImageGrid.tsx) | `handleStackClick`, scroll restore, stack card rendering |
-| [`src/components/App.tsx`](../src/App.tsx) | "Back to all stacks" bar rendering |
-| [`src/services/clusteringEngine.ts`](../src/services/clusteringEngine.ts) | 4-phase clustering algorithm |
+| [`src/App.tsx`](../src/App.tsx) | "Back to all stacks" bar, indexing-completion trigger, file watcher triggers |
+| [`src/services/imageAnnotationsStorage.ts`](../src/services/imageAnnotationsStorage.ts) | `bulkSaveAnnotations`, `loadAllAnnotations` — canonical persistence for stack fields |
+| [`src/services/clusteringEngine.ts`](../src/services/clusteringEngine.ts) | 4-phase clustering algorithm, `addImageToClusters`, `removeImagesFromClusters` |
 | [`src/services/workers/clusteringWorker.ts`](../src/services/workers/clusteringWorker.ts) | Web Worker wrapper for clustering |
-| [`src/services/clusterCacheManager.ts`](../src/services/clusterCacheManager.ts) | Disk persistence for clusters |
-| [`src/utils/similarityMetrics.ts`](../src/utils/similarityMetrics.ts) | Jaccard, Levenshtein, tokenization utilities |
+| [`src/services/clusterCacheManager.ts`](../src/services/clusterCacheManager.ts) | Disk persistence for Smart Library clusters |
+| [`src/utils/similarityMetrics.ts`](../src/utils/similarityMetrics.ts) | `normalizePrompt`, `generatePromptHash`, Jaccard, Levenshtein, tokenization |
 | [`src/components/SmartLibrary.tsx`](../src/components/SmartLibrary.tsx) | Smart Library view with cluster cards |
 | [`src/components/StackExpandedView.tsx`](../src/components/StackExpandedView.tsx) | Cluster drill-down overlay |
 | [`src/components/StackCard.tsx`](../src/components/StackCard.tsx) | Cluster card rendering in Smart Library |
@@ -256,35 +327,28 @@ Unlike library stacks, cluster drill-down uses **local component state** and an 
 
 ### Manual Image Addition to Stacks
 
-The current `LibraryStackContext.imageIds` array is the membership list. To add an image:
+Stack membership is stored as `stackGroupId` on each image's annotation. To manually move an image to a different stack:
 
 ```typescript
-const ctx = useImageStore.getState().libraryStackContext;
-if (ctx) {
-  const updated = { ...ctx, imageIds: [...ctx.imageIds, newImageId] };
-  setLibraryStackContext(updated);
+const annotation = annotations.get(imageId);
+if (annotation) {
+  const updated = { ...annotation, stackGroupId: 'target-hash', updatedAt: Date.now() };
+  await saveAnnotation(updated);
+  // applyAnnotationsToImages will denormalize on next state update
 }
 ```
 
-This instantly updates the filtered grid. Future work:
-- Drag-and-drop images onto stack cards
-- Multi-select → "Add to Stack" context menu action
-- Remove individual images from stack view
+Future work:
+- Drag-and-drop images between stacks
+- Multi-select → "Move to Stack" context menu action
+- Remove individual images from a stack (clear `stackGroupId`)
 
 ### Similarity-Based Stacking in Library
 
-The library currently uses exact prompt matching ([`useImageStacking.ts`](../src/hooks/useImageStacking.ts)). To add similarity-based grouping:
-- Integrate `hybridSimilarity` from [`similarityMetrics.ts`](../src/utils/similarityMetrics.ts) into the grouping hook
-- Add a similarity threshold slider to the stacking toolbar
-- Consider performance: Phase 1 (exact) + Phase 3 (similarity within buckets) from the clustering engine could be extracted into a lighter worker
-
-### Persistent Stacks
-
-Library stacks are ephemeral (recomputed each render). To persist them across sessions:
-- Adopt the `clusterCacheManager` pattern for library stacks
-- Store `{ promptHash, basePrompt, imageIds }` per stack in IndexedDB
-- Reconcile on file deletion via `removeImagesFromClusters`-style cleanup
-- This also enables user-defined stacks that survive folder refreshes
+The library currently uses exact prompt hash matching via `generatePromptHash`. The data model supports similarity: `stackGroupId` is just a string, and `getPromptKey` in the fallback path normalizes text. To add similarity grouping:
+- Integrate `hybridSimilarity` from [`similarityMetrics.ts`](../src/utils/similarityMetrics.ts) into `syncNewImagesToStacks`
+- Instead of exact hash match, check each new image against existing stack `basePrompt` values using the similarity threshold
+- This would make library stacks use the same similarity logic as Smart Library clusters, but incrementally
 
 ---
 

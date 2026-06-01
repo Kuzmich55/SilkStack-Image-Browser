@@ -8,6 +8,139 @@ interface UseImageStackingResult {
   isStackingEnabled: boolean;
 }
 
+// ── Sorting helpers ────────────────────────────────────────────────────
+
+type StackItem = IndexedImage | ImageStack;
+
+const getRepImage = (item: StackItem): IndexedImage =>
+  'coverImage' in item ? item.coverImage : item;
+
+const compareById = (x: IndexedImage, y: IndexedImage) => x.id.localeCompare(y.id);
+
+const compareByNameAsc = (x: IndexedImage, y: IndexedImage) => {
+  const c = (x.name || '').localeCompare(y.name || '');
+  return c !== 0 ? c : compareById(x, y);
+};
+
+const sortItems = (
+  items: StackItem[],
+  sortOrder: 'asc' | 'desc' | 'date-asc' | 'date-desc' | 'random',
+  displayStarredFirst: boolean
+): StackItem[] => {
+  return [...items].sort((a, b) => {
+    const imgA = getRepImage(a);
+    const imgB = getRepImage(b);
+
+    if (displayStarredFirst) {
+      const favA = imgA.isFavorite || false;
+      const favB = imgB.isFavorite || false;
+      if (favA && !favB) return -1;
+      if (!favA && favB) return 1;
+    }
+
+    if (sortOrder === 'asc') return compareByNameAsc(imgA, imgB);
+    if (sortOrder === 'desc') {
+      const c = (imgB.name || '').localeCompare(imgA.name || '');
+      return c !== 0 ? c : compareById(imgA, imgB);
+    }
+    if (sortOrder === 'date-asc') {
+      const c = (imgA.lastModified || 0) - (imgB.lastModified || 0);
+      return c !== 0 ? c : compareByNameAsc(imgA, imgB);
+    }
+    // Default: date-desc
+    const c = (imgB.lastModified || 0) - (imgA.lastModified || 0);
+    return c !== 0 ? c : compareByNameAsc(imgA, imgB);
+  });
+};
+
+// ── Grouping strategies ────────────────────────────────────────────────
+
+/**
+ * Convert grouped images into a sorted list of ImageStacks and singletons.
+ */
+function buildResult(groups: Map<string, IndexedImage[]>, ungrouped: IndexedImage[]): StackItem[] {
+  const result: StackItem[] = [];
+
+  for (const groupImages of groups.values()) {
+    const sorted = [...groupImages].sort(
+      (a, b) => (b.lastModified || 0) - (a.lastModified || 0)
+    );
+
+    if (sorted.length === 1) {
+      result.push(sorted[0]);
+    } else {
+      result.push({
+        id: `stack-${sorted[0].id}`,
+        coverImage: sorted[0],
+        images: sorted,
+        count: sorted.length,
+      });
+    }
+  }
+
+  result.push(...ungrouped);
+  return result;
+}
+
+/**
+ * Group by stackGroupId annotation (persisted, set by syncNewImagesToStacks).
+ * Images without a stackGroupId appear as singletons.
+ */
+function groupByStackAnnotation(images: IndexedImage[]): StackItem[] {
+  const groups = new Map<string, IndexedImage[]>();
+  const ungrouped: IndexedImage[] = [];
+
+  for (const img of images) {
+    const key = img.stackGroupId;
+    if (key) {
+      const group = groups.get(key);
+      if (group) {
+        group.push(img);
+      } else {
+        groups.set(key, [img]);
+      }
+    } else {
+      ungrouped.push(img);
+    }
+  }
+
+  return buildResult(groups, ungrouped);
+}
+
+/**
+ * Group by exact normalized prompt match (fallback when no annotations exist yet).
+ */
+function groupByExactPrompt(images: IndexedImage[]): StackItem[] {
+  const normalizeText = (text: any): string => {
+    if (typeof text !== 'string') return '';
+    return text.toLowerCase().replace(/[\s\r\n]+/g, ' ').trim();
+  };
+
+  const getPromptKey = (image: IndexedImage) =>
+    normalizeText(image.prompt || image.metadata?.normalizedMetadata?.prompt || image.metadata?.positive_prompt);
+
+  const groups = new Map<string, IndexedImage[]>();
+  const ungrouped: IndexedImage[] = [];
+
+  for (const img of images) {
+    const key = getPromptKey(img);
+    if (key) {
+      const group = groups.get(key);
+      if (group) {
+        group.push(img);
+      } else {
+        groups.set(key, [img]);
+      }
+    } else {
+      ungrouped.push(img);
+    }
+  }
+
+  return buildResult(groups, ungrouped);
+}
+
+// ── Hook ───────────────────────────────────────────────────────────────
+
 export const useImageStacking = (
   images: IndexedImage[],
   isEnabled: boolean
@@ -20,117 +153,16 @@ export const useImageStacking = (
       return images;
     }
 
-    const normalizeText = (text: any): string => {
-      if (typeof text !== 'string') return '';
-      return text
-        .toLowerCase()
-        .replace(/[\s\r\n]+/g, ' ') // Normalize spaces, tabs, and newlines to a single space
-        .trim();
-    };
+    // If any image has a stackGroupId (set by syncNewImagesToStacks), use the
+    // persisted annotation-based grouping. Otherwise fall back to on-the-fly
+    // exact prompt matching so stacking works before the first sync runs.
+    const hasAnnotations = images.some(img => img.stackGroupId !== undefined);
 
-    const getPromptKey = (image: IndexedImage) => {
-      // Group strictly by normalized positive prompt to avoid splits due to negative prompt differences
-      return normalizeText(image.prompt || image.metadata?.normalizedMetadata?.prompt || image.metadata?.positive_prompt);
-    };
+    const items = hasAnnotations
+      ? groupByStackAnnotation(images)
+      : groupByExactPrompt(images);
 
-    // Group images globally by prompt key
-    const groups = new Map<string, IndexedImage[]>();
-    const noPromptImages: IndexedImage[] = [];
-
-    for (let i = 0; i < images.length; i++) {
-      const img = images[i];
-      const key = getPromptKey(img);
-
-      if (key === '') {
-        noPromptImages.push(img);
-      } else {
-        const group = groups.get(key);
-        if (group) {
-          group.push(img);
-        } else {
-          groups.set(key, [img]);
-        }
-      }
-    }
-
-    const result: (IndexedImage | ImageStack)[] = [];
-
-    // Process groups into stacks or single images
-    for (const groupImages of groups.values()) {
-      // Sort images inside the stack by date descending (latest first)
-      const sortedGroupImages = [...groupImages].sort(
-        (a, b) => (b.lastModified || 0) - (a.lastModified || 0)
-      );
-
-      if (sortedGroupImages.length === 1) {
-        result.push(sortedGroupImages[0]);
-      } else {
-        const coverImage = sortedGroupImages[0];
-        result.push({
-          id: `stack-${coverImage.id}`,
-          coverImage,
-          images: sortedGroupImages,
-          count: sortedGroupImages.length,
-        });
-      }
-    }
-
-    // Add images without prompt
-    result.push(...noPromptImages);
-
-    // Helper to get representative image for sorting
-    const getRepImage = (item: IndexedImage | ImageStack): IndexedImage => {
-      return 'coverImage' in item ? item.coverImage : item;
-    };
-
-    // Sort the final list of items (single images and stacks)
-    result.sort((a, b) => {
-      const imgA = getRepImage(a);
-      const imgB = getRepImage(b);
-
-      const compareById = (x: IndexedImage, y: IndexedImage) => x.id.localeCompare(y.id);
-      
-      const compareByNameAsc = (x: IndexedImage, y: IndexedImage) => {
-        const nameComparison = (x.name || '').localeCompare(y.name || '');
-        if (nameComparison !== 0) return nameComparison;
-        return compareById(x, y);
-      };
-
-      const compareByNameDesc = (x: IndexedImage, y: IndexedImage) => {
-        const nameComparison = (y.name || '').localeCompare(x.name || '');
-        if (nameComparison !== 0) return nameComparison;
-        return compareById(x, y);
-      };
-
-      const compareByDateAsc = (x: IndexedImage, y: IndexedImage) => {
-        const dateComparison = (x.lastModified || 0) - (y.lastModified || 0);
-        if (dateComparison !== 0) return dateComparison;
-        return compareByNameAsc(x, y);
-      };
-
-      const compareByDateDesc = (x: IndexedImage, y: IndexedImage) => {
-        const dateComparison = (y.lastModified || 0) - (x.lastModified || 0);
-        if (dateComparison !== 0) return dateComparison;
-        return compareByNameAsc(x, y);
-      };
-
-      // Apply starred first logic if enabled, mirroring useImageStore's sort exactly
-      if (displayStarredFirst) {
-        const isFavA = imgA.isFavorite || false;
-        const isFavB = imgB.isFavorite || false;
-        if (isFavA && !isFavB) return -1;
-        if (!isFavA && isFavB) return 1;
-      }
-
-      if (sortOrder === 'asc') return compareByNameAsc(imgA, imgB);
-      if (sortOrder === 'desc') return compareByNameDesc(imgA, imgB);
-      if (sortOrder === 'date-asc') return compareByDateAsc(imgA, imgB);
-      
-      // Default to date-desc (ordered by latest image date)
-      return compareByDateDesc(imgA, imgB);
-    });
-
-    return result;
+    return sortItems(items, sortOrder, displayStarredFirst);
   }, [images, isEnabled, sortOrder, displayStarredFirst]);
 
   return {
