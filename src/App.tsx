@@ -90,8 +90,8 @@ export default function App() {
 
   const isStackingEnabled = useImageStore((state) => state.isStackingEnabled);
   const setStackingEnabled = useImageStore((state) => state.setStackingEnabled);
-  const viewingStackPrompt = useImageStore((state) => state.viewingStackPrompt);
-  const setViewingStackPrompt = useImageStore((state) => state.setViewingStackPrompt);
+  const libraryStackContext = useImageStore((state) => state.libraryStackContext);
+  const setLibraryStackContext = useImageStore((state) => state.setLibraryStackContext);
   const isAnnotationsLoaded = useImageStore((state) => state.isAnnotationsLoaded);
   const refreshingDirectories = useImageStore((state) => state.refreshingDirectories);
 
@@ -835,13 +835,12 @@ export default function App() {
              style={{ marginLeft: layoutOffset }}>
           <main className="flex-1 overflow-hidden relative flex flex-col">
             {/* Back from Stack Button - Now outside header */}
-            {activeView === 'library' && viewingStackPrompt && (
+            {activeView === 'library' && libraryStackContext && (
               <div className="px-6 py-2 bg-gray-900/40 border-b border-gray-800/40 flex items-center shrink-0">
                 <button
                   onClick={() => {
-                    setSearchQuery('');
                     setStackingEnabled(true);
-                    setViewingStackPrompt(null);
+                    setLibraryStackContext(null);
                   }}
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/10 text-blue-400 rounded-md hover:bg-blue-500/20 transition-all text-xs font-medium border border-blue-500/20 shadow-sm"
                 >
@@ -849,7 +848,7 @@ export default function App() {
                   <span>Back to all stacks</span>
                 </button>
                 <div className="ml-3 text-xs text-gray-400 truncate">
-                  Viewing stack: <span className="text-gray-200 font-mono">{viewingStackPrompt}</span>
+                  Viewing stack: <span className="text-gray-200 font-mono">{libraryStackContext.basePrompt}</span>
                 </div>
               </div>
             )}

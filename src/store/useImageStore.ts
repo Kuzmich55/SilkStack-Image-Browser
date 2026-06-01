@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { IndexedImage, Directory, ThumbnailStatus, ImageAnnotations, TagInfo, ImageCluster, AutoTag } from '../types';
+import { IndexedImage, Directory, ThumbnailStatus, ImageAnnotations, TagInfo, ImageCluster, AutoTag, LibraryStackContext } from '../types';
 import { loadSelectedFolders, saveSelectedFolders, loadExcludedFolders, saveExcludedFolders } from '../services/folderSelectionStorage';
 import { loadFolderPreferences, saveFolderPreference, deleteFolderPreference, FolderPreference } from '../services/folderPreferencesStorage';
 import {
@@ -185,7 +185,7 @@ interface ImageState {
   focusedImageIndex: number | null;
   isStackingEnabled: boolean;
   scanSubfolders: boolean;
-  viewingStackPrompt: string | null;  // For Back to Stacks navigation
+  libraryStackContext: LibraryStackContext | null;  // For Back to Stacks navigation (ID-based, preserves search bar)
   isFullscreenMode: boolean;
   activeView: 'library' | 'smart' | 'model';
 
@@ -291,7 +291,7 @@ interface ImageState {
   deleteSelectedImages: () => Promise<void>; // This will require file operations logic
   setScanSubfolders: (scan: boolean) => void;
   setFocusedImageIndex: (index: number | null) => void;
-  setViewingStackPrompt: (prompt: string | null) => void;
+  setLibraryStackContext: (context: LibraryStackContext | null) => void;
   setFullscreenMode: (isFullscreen: boolean) => void;
 
   // Clustering Actions (Phase 2)
@@ -566,6 +566,7 @@ export const useImageStore = create<ImageState>((set, get) => {
 
     const isFilteringActive = (state: ImageState) => {
         if (state.searchQuery) return true;
+        if (state.libraryStackContext) return true;
         if (state.showFavoritesOnly) return true;
         if (state.selectedTags?.length) return true;
 
@@ -735,7 +736,7 @@ export const useImageStore = create<ImageState>((set, get) => {
 
     // --- Helper function for basic filtering and sorting ---
     const filterAndSort = (state: ImageState) => {
-        const { images, searchQuery, selectedModels, selectedLoras, selectedSchedulers, sortOrder, advancedFilters, directories, selectedFolders, excludedFolders, includeSubfolders } = state;
+        const { images, searchQuery, libraryStackContext, selectedModels, selectedLoras, selectedSchedulers, sortOrder, advancedFilters, directories, selectedFolders, excludedFolders, includeSubfolders } = state;
 
         const visibleDirectoryIds = new Set(
             directories.filter(dir => (dir.visible ?? true) && (dir.isConnected !== false)).map(dir => dir.id)
@@ -831,7 +832,11 @@ export const useImageStore = create<ImageState>((set, get) => {
             });
         }
 
-        if (searchQuery) {
+        // ID-based stack filtering (preserves search bar state)
+        if (libraryStackContext) {
+            const contextImageIds = new Set(libraryStackContext.imageIds);
+            results = results.filter(image => contextImageIds.has(image.id));
+        } else if (searchQuery) {
             const searchTerms = searchQuery
                 .toLowerCase()
                 .split(/\s+/)
@@ -1088,7 +1093,7 @@ export const useImageStore = create<ImageState>((set, get) => {
         randomSeed: Date.now(),
         advancedFilters: {},
         scanSubfolders: localStorage.getItem('image-metahub-scan-subfolders') !== 'false', // Default to true
-        viewingStackPrompt: null,
+        libraryStackContext: null,
         activeView: 'library',
         isFullscreenMode: false,
 
@@ -2763,7 +2768,7 @@ export const useImageStore = create<ImageState>((set, get) => {
             previewImage: null,
             focusedImageIndex: null,
             scanSubfolders: true,
-            viewingStackPrompt: null,
+            libraryStackContext: null,
             sortOrder: useSettingsStore.getState().sortOrder || 'date-desc',
             isFullscreenMode: false,
             annotations: new Map(),
@@ -2812,8 +2817,8 @@ export const useImageStore = create<ImageState>((set, get) => {
             useSettingsStore.getState().setStackingEnabled(enabled);
         },
 
-        setViewingStackPrompt: (prompt: string | null) => {
-            set({ viewingStackPrompt: prompt });
+        setLibraryStackContext: (context: LibraryStackContext | null) => {
+            set(state => ({ ...filterAndSort({ ...state, libraryStackContext: context }), libraryStackContext: context }));
         },
     };
 });

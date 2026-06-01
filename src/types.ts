@@ -1133,3 +1133,14 @@ export interface ImageStack {
   images: IndexedImage[]; // All images in this stack
   count: number; // Total number of images in stack
 }
+
+/**
+ * Context for drilling into a library stack.
+ * Stores explicit image IDs so filtering is ID-based rather than text-based,
+ * leaving the search bar untouched. Supports future manual image addition.
+ */
+export interface LibraryStackContext {
+  stackId: string;
+  imageIds: string[];
+  basePrompt: string;
+}

@@ -3,7 +3,7 @@ import AutoSizer from 'react-virtualized-auto-sizer';
 import { computeJustifiedLayout, getItemAspectRatio, type LayoutRow } from '../utils/layoutAlgo';
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { type IndexedImage, type BaseMetadata, ImageStack } from '../types';
+import { type IndexedImage, type BaseMetadata, ImageStack, type LibraryStackContext } from '../types';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useImageStore } from '../store/useImageStore';
 import { useContextMenu } from '../hooks/useContextMenu';
@@ -548,12 +548,11 @@ const ImageGrid: React.FC<ImageGridProps & { width: number; height: number }> = 
   // --- Stacking Logic (Must be top-level) ---
   const isStackingEnabled = useImageStore((state) => state.isStackingEnabled);
   const setStackingEnabled = useImageStore((state) => state.setStackingEnabled);
-  const setViewingStackPrompt = useImageStore((state) => state.setViewingStackPrompt);
-  const setSearchQuery = useImageStore((state) => state.setSearchQuery);
-  const viewingStackPrompt = useImageStore((state) => state.viewingStackPrompt);
+  const setLibraryStackContext = useImageStore((state) => state.setLibraryStackContext);
+  const libraryStackContext = useImageStore((state) => state.libraryStackContext);
   const mainLibraryScrollPositionRef = useRef<number>(0);
   const pendingRestoreStackScrollRef = useRef<boolean>(false);
-  const prevViewingStackPromptRef = useRef<string | null>(null);
+  const prevLibraryStackContextRef = useRef<LibraryStackContext | null>(null);
 
   const { stackedItems } = useImageStacking(images, isStackingEnabled);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -621,23 +620,23 @@ const ImageGrid: React.FC<ImageGridProps & { width: number; height: number }> = 
   }, [itemsToRender, width, imageSize]);
 
   React.useLayoutEffect(() => {
-    if (prevViewingStackPromptRef.current !== null && viewingStackPrompt === null) {
+    if (prevLibraryStackContextRef.current !== null && libraryStackContext === null) {
       pendingRestoreStackScrollRef.current = true;
     }
-    prevViewingStackPromptRef.current = viewingStackPrompt;
-  }, [viewingStackPrompt]);
+    prevLibraryStackContextRef.current = libraryStackContext;
+  }, [libraryStackContext]);
 
   React.useLayoutEffect(() => {
     if (pendingRestoreStackScrollRef.current && gridRef.current) {
       if (rows.length > 0 || itemsToRender.length === 0) {
         const savedPos = mainLibraryScrollPositionRef.current;
-        
+
         // Reset the virtualized list cache completely from index 0
         // to ensure perfect, pixel-precise height and offset calculations
         if (listRef.current) {
           listRef.current.resetAfterIndex(0, true);
         }
-        
+
         requestAnimationFrame(() => {
           if (gridRef.current) {
             gridRef.current.scrollTo({ top: savedPos, behavior: 'instant' });
@@ -647,7 +646,7 @@ const ImageGrid: React.FC<ImageGridProps & { width: number; height: number }> = 
         pendingRestoreStackScrollRef.current = false;
       }
     }
-  }, [viewingStackPrompt, rows.length, itemsToRender.length]);
+  }, [libraryStackContext, rows.length, itemsToRender.length]);
 
   // Dynamic Scroll Anchoring to keep the viewport stable when row heights change (due to lazy loading / dimension updates)
   React.useLayoutEffect(() => {
@@ -1297,14 +1296,19 @@ const ImageGrid: React.FC<ImageGridProps & { width: number; height: number }> = 
       mainLibraryScrollPositionRef.current = gridRef.current.scrollTop;
     }
 
-    // Set search query to the prompt of the stack
+    // Build ID-based stack context — filters by explicit image IDs instead of
+    // polluting the search bar. This supports future manual image addition.
     const prompt = stack.coverImage.metadata?.normalizedMetadata?.prompt || stack.coverImage.metadata?.positive_prompt;
-    if (prompt) {
-        setSearchQuery(prompt);
+    if (prompt && stack.images.length > 0) {
+        const context: LibraryStackContext = {
+          stackId: stack.id,
+          imageIds: stack.images.map(img => img.id),
+          basePrompt: prompt,
+        };
+        setLibraryStackContext(context);
         setStackingEnabled(false); // Disable stacking when drilling down to see individual items
-        setViewingStackPrompt(prompt); // Enable "Back to Stacks" mode
     }
-  }, [setSearchQuery, setStackingEnabled, setViewingStackPrompt]);
+  }, [setLibraryStackContext, setStackingEnabled]);
 
   // Use itemsToRender for calculations
   const isEmpty = itemsToRender.length === 0;
