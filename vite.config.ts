@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import { copyFileSync, readFileSync } from 'fs'
+import { copyFileSync, existsSync, readFileSync } from 'fs'
 import { resolve } from 'path'
 
 // Read package.json to get version
@@ -12,6 +12,12 @@ const licenseSecret =
   process.env.VITE_IMH_LICENSE_SECRET ||
   process.env.IMH_LICENSE_SECRET ||
   'CHANGE-ME-BEFORE-RELEASE'
+
+// Detect whether the ai-intelligence package is available at build time.
+// This lets components conditionally show/hide AI-dependent UI.
+const aiFeaturesAvailable = existsSync(
+  resolve(__dirname, 'ai-intelligence', 'package.json')
+)
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -43,6 +49,7 @@ export default defineConfig({
   define: {
     'import.meta.env.VITE_IMH_LICENSE_SECRET': JSON.stringify(licenseSecret),
     'import.meta.env.VITE_APP_VERSION': JSON.stringify(pkg.version),
+    'import.meta.env.VITE_AI_FEATURES_AVAILABLE': JSON.stringify(aiFeaturesAvailable),
   },
   server: {
     host: true, // Expose server to the network

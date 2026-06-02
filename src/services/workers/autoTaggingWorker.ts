@@ -4,15 +4,20 @@
  * The worker initializes the LLM-based Tag Generator (Llama 3.2 3B) when
  * WebGPU is available, falling back to rule-based extraction on errors or
  * unsupported environments.
+ *
+ * All AI imports flow through the aiBridge — when the ai-intelligence package
+ * is unavailable, the worker degrades gracefully to rule-based extraction.
  */
 
 import type { AutoTag } from '../../types';
 import type { TaggingImage } from '../autoTaggingEngine';
 import {
-  LLMTagGenerator,
-  TagGenerator,
+  createLLMTagGenerator,
+  createTagGenerator,
   TAG_GENERATION_MODEL_ID,
-} from '@ai-images-browser/ai-intelligence';
+  type ILLMTagGenerator,
+  type ITagGenerator,
+} from '../aiBridge';
 
 type WorkerMessage =
   | {
@@ -48,8 +53,8 @@ type WorkerResponse =
     };
 
 let isCancelled = false;
-let llmGenerator: LLMTagGenerator | null = null;
-let fallbackGenerator: TagGenerator | null = null;
+let llmGenerator: ILLMTagGenerator | null = null;
+let fallbackGenerator: ITagGenerator | null = null;
 let llmInitError: string | null = null;
 let mode: 'llm' | 'fallback' = 'fallback';
 
@@ -76,11 +81,20 @@ async function initLLM(): Promise<boolean> {
   postProgress(0, 0, 'Loading tag generation model...');
 
   try {
-    llmGenerator = new LLMTagGenerator(TAG_GENERATION_MODEL_ID, (report) => {
-      if (!isCancelled) {
-        postProgress(report.progress, 0, `Loading model: ${report.text}`);
-      }
-    });
+    llmGenerator = await createLLMTagGenerator(
+      TAG_GENERATION_MODEL_ID,
+      (report) => {
+        if (!isCancelled) {
+          postProgress(report.progress, 0, `Loading model: ${report.text}`);
+        }
+      },
+    );
+
+    if (!llmGenerator) {
+      llmInitError = 'AI intelligence module is not available';
+      console.warn('[autoTaggingWorker] AI module unavailable, falling back to rule-based extraction');
+      return false;
+    }
 
     await llmGenerator.initialize();
 
@@ -96,9 +110,9 @@ async function initLLM(): Promise<boolean> {
   return false;
 }
 
-function getFallbackGenerator(): TagGenerator {
+async function getFallbackGenerator(): Promise<ITagGenerator> {
   if (!fallbackGenerator) {
-    fallbackGenerator = new TagGenerator();
+    fallbackGenerator = await createTagGenerator();
   }
   return fallbackGenerator;
 }
@@ -138,7 +152,8 @@ async function startAutoTagging(
         if (llmReady && llmGenerator) {
           generatedTags = await llmGenerator.generateTagsFromPrompt(prompt);
         } else {
-          generatedTags = await getFallbackGenerator().generateTagsFromPrompt(prompt);
+          const fb = await getFallbackGenerator();
+          generatedTags = await fb.generateTagsFromPrompt(prompt);
         }
       }
 

@@ -11,7 +11,8 @@
     "dev": "vite --host 0.0.0.0",
     "dev:app": "node scripts/start-dev.js",
     "prebuild": "node -e \"require('fs').copyFileSync('docs/CHANGELOG.md', 'public/CHANGELOG.md')\"",
-    "build": "npm run build --prefix ai-intelligence && tsc -b && vite build",
+    "build:ai": "node scripts/build-ai-intelligence.cjs",
+    "build": "npm run build:ai && tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "electron": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
@@ -50,8 +51,10 @@
     "react-zoom-pan-pinch": "^3.6.1",
     "recharts": "^3.4.1",
     "zustand": "^5.0.8",
-    "@ai-images-browser/ai-intelligence": "file:./ai-intelligence",
     "@mlc-ai/web-llm": "^0.2.77"
+  },
+  "optionalDependencies": {
+    "@ai-images-browser/ai-intelligence": "file:./ai-intelligence"
   },
   "devDependencies": {
     "@eslint/js": "^9.37.0",

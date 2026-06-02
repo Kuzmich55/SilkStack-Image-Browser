@@ -15,12 +15,16 @@
  *   { type: 'ready',       payload: { modelId: string; dimension: number } }
  *   { type: 'embeddings',  payload: { embeddings: Float32Array[]; requestId: string; done: number; total: number } }
  *   { type: 'error',       payload: { error: string; requestId?: string } }
+ *
+ * All AI imports flow through the aiBridge — when the ai-intelligence package
+ * is unavailable, embedding requests return errors gracefully.
  */
 
 import {
-  WebLLMEmbeddingProvider,
+  createEmbeddingProvider,
   EMBEDDING_MODEL_ID,
-} from '@ai-images-browser/ai-intelligence';
+  type IEmbeddingProvider,
+} from '../aiBridge';
 
 // Arctic Embed M produces 768-dimensional vectors
 const EMBEDDING_DIMENSION = 768;
@@ -39,7 +43,7 @@ type WorkerResponse =
     }
   | { type: 'error'; payload: { error: string; requestId?: string } };
 
-let provider: WebLLMEmbeddingProvider | null = null;
+let provider: IEmbeddingProvider | null = null;
 let isCancelled = false;
 
 self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
@@ -65,10 +69,21 @@ async function handleInit(modelIdOverride?: string): Promise<void> {
 
     postProgress(0, `Loading embedding model...`);
 
-    provider = new WebLLMEmbeddingProvider(modelId, EMBEDDING_DIMENSION, (report) => {
-      // report.progress is 0–1; report.text describes current step
-      postProgress(report.progress, report.text ?? 'Downloading model weights...');
-    });
+    provider = await createEmbeddingProvider(
+      modelId,
+      EMBEDDING_DIMENSION,
+      (report) => {
+        // report.progress is 0–1; report.text describes current step
+        postProgress(report.progress, report.text ?? 'Downloading model weights...');
+      },
+    );
+
+    if (!provider) {
+      postError(
+        'AI intelligence module is not available. Embedding features require the ai-intelligence package.',
+      );
+      return;
+    }
 
     await provider.initialize();
 
@@ -83,7 +98,10 @@ async function handleInit(modelIdOverride?: string): Promise<void> {
 async function handleEmbed(texts: string[], requestId: string): Promise<void> {
   try {
     if (!provider) {
-      postError('Provider not initialized. Send "init" first.', requestId);
+      postError(
+        'Provider not initialized. The AI module may be unavailable. Send "init" first.',
+        requestId,
+      );
       return;
     }
     if (isCancelled) return;

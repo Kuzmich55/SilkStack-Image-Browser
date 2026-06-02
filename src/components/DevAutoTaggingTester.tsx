@@ -1,5 +1,12 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { LLMTagGenerator, TAG_GENERATION_MODEL_ID, SYSTEM_PROMPT } from '@ai-images-browser/ai-intelligence';
+import {
+  createLLMTagGenerator,
+  TAG_GENERATION_MODEL_ID,
+  SYSTEM_PROMPT,
+  isAiAvailable,
+  getAiLoadError,
+  type ILLMTagGenerator,
+} from '../services/aiBridge';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -25,7 +32,7 @@ export default function DevAutoTaggingTester() {
   const [systemPrompt, setSystemPrompt] = useState(SYSTEM_PROMPT);
   const systemPromptModified = systemPrompt !== SYSTEM_PROMPT;
 
-  const llmRef = useRef<LLMTagGenerator | null>(null);
+  const llmRef = useRef<ILLMTagGenerator | null>(null);
 
   // Apply theme on mount (same pattern as ImageModalWindow)
   useEffect(() => {
@@ -60,25 +67,63 @@ export default function DevAutoTaggingTester() {
 
   // Initialize the LLM on mount
   useEffect(() => {
-    const llm = new LLMTagGenerator(TAG_GENERATION_MODEL_ID, (report) => {
-      setLoadProgress(Math.round(report.progress * 100));
-      setLoadText(report.text);
-    });
-    llmRef.current = llm;
+    let cancelled = false;
 
-    llm.initialize()
-      .then(() => {
-        setLoadState('ready');
-        setLoadText('Model ready');
-      })
-      .catch((err) => {
-        setLoadState('error');
-        setError(`Model initialization failed: ${err.message || err}`);
-        setLoadText('Model failed to load');
+    async function init() {
+      // First check if the AI module is even available
+      const available = await isAiAvailable();
+      if (!available) {
+        if (!cancelled) {
+          const errMsg = await getAiLoadError();
+          setLoadState('error');
+          setError(
+            'AI intelligence module is not available. ' +
+            'The ai-intelligence package must be installed for LLM-based auto-tagging. ' +
+            (errMsg ? `(${errMsg})` : ''),
+          );
+          setLoadText('AI module unavailable');
+        }
+        return;
+      }
+
+      const llm = await createLLMTagGenerator(TAG_GENERATION_MODEL_ID, (report) => {
+        if (!cancelled) {
+          setLoadProgress(Math.round(report.progress * 100));
+          setLoadText(report.text);
+        }
       });
 
+      if (!llm) {
+        if (!cancelled) {
+          setLoadState('error');
+          setError('Failed to create LLM tag generator. Check that WebGPU is supported and the model is available.');
+          setLoadText('Generator creation failed');
+        }
+        return;
+      }
+
+      llmRef.current = llm;
+
+      try {
+        await llm.initialize();
+        if (!cancelled) {
+          setLoadState('ready');
+          setLoadText('Model ready');
+        }
+      } catch (err: any) {
+        if (!cancelled) {
+          setLoadState('error');
+          setError(`Model initialization failed: ${err.message || err}`);
+          setLoadText('Model failed to load');
+        }
+      }
+    }
+
+    init();
+
     return () => {
-      llm.dispose();
+      cancelled = true;
+      llmRef.current?.dispose();
     };
   }, []);
 
@@ -103,7 +148,7 @@ export default function DevAutoTaggingTester() {
     } finally {
       setGenerating(false);
     }
-  }, [llmRef, loadState, prompt, topN, systemPrompt]);
+  }, [loadState, prompt, topN, systemPrompt]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.ctrlKey && e.key === 'Enter') {
@@ -181,7 +226,7 @@ export default function DevAutoTaggingTester() {
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
         {/* Left Column (Inputs) */}
         <div className="w-full lg:w-3/5 flex flex-col overflow-y-auto scrollbar-adaptive p-6 space-y-6 border-b lg:border-b-0 lg:border-r border-gray-800">
-          
+
           {/* Error */}
           {error && (
             <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/40 rounded-lg text-sm text-red-600 dark:text-red-400 shrink-0">
