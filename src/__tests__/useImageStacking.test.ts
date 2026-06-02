@@ -75,9 +75,10 @@ describe('useImageStacking Hook', () => {
     useImageStore.setState({ sortOrder: 'date-desc' });
     useSettingsStore.setState({ displayStarredFirst: false });
 
+    // Different prompts so the exact-prompt fallback does not group them
     const images: IndexedImage[] = [
       createImage({ id: '1', prompt: 'A beautiful cat', lastModified: 1000 }),
-      createImage({ id: '2', prompt: 'A beautiful cat', lastModified: 800 }),
+      createImage({ id: '2', prompt: 'A playful dog', lastModified: 800 }),
     ];
 
     const { result } = renderHook(() => useImageStacking(images, true));
@@ -137,5 +138,70 @@ describe('useImageStacking Hook', () => {
     const stackA = stacked[1] as any;
     expect(stackA.coverImage.id).toBe('1');
     expect(stackA.images.length).toBe(2);
+  });
+
+  it('creates subGroups for stacks with images from similar prompts', () => {
+    useImageStore.setState({ sortOrder: 'date-desc' });
+    useSettingsStore.setState({ displayStarredFirst: false });
+
+    // Three images: two similar cat prompts (same stackGroupId = already merged
+    // by syncNewImagesToStacks), one different dog prompt
+    const images: IndexedImage[] = [
+      createImage({ id: '1', prompt: 'a cat sitting on a chair', lastModified: 1000, stackGroupId: 'sim-group-1' }),
+      createImage({ id: '2', prompt: 'a cat sleeping on a chair', lastModified: 900, stackGroupId: 'sim-group-1' }),
+      createImage({ id: '3', prompt: 'a cat sitting on a chair', lastModified: 800, stackGroupId: 'sim-group-1' }),
+    ];
+
+    const { result } = renderHook(() => useImageStacking(images, true));
+    const stacked = result.current.stackedItems;
+
+    // All three share the same stackGroupId → one stack
+    expect(stacked.length).toBe(1);
+
+    const stack = stacked[0] as any;
+    expect(stack.coverImage).toBeDefined();
+    expect(stack.images.length).toBe(3);
+    expect(stack.count).toBe(3);
+
+    // Should have subGroups since images have different exact prompts
+    expect(stack.subGroups).toBeDefined();
+    expect(stack.subGroups.length).toBe(2); // "a cat sitting on a chair" and "a cat sleeping on a chair"
+
+    // Sub-groups should be sorted by size (largest first)
+    expect(stack.subGroups[0].prompt).toBe('a cat sitting on a chair');
+    expect(stack.subGroups[0].size).toBe(2);
+    expect(stack.subGroups[0].imageIds).toEqual(['1', '3']);
+
+    expect(stack.subGroups[1].prompt).toBe('a cat sleeping on a chair');
+    expect(stack.subGroups[1].size).toBe(1);
+    expect(stack.subGroups[1].imageIds).toEqual(['2']);
+
+    // basePrompt should be set
+    expect(stack.basePrompt).toBe('a cat sitting on a chair');
+  });
+
+  it('includes subGroups even for single-prompt stacks', () => {
+    useImageStore.setState({ sortOrder: 'date-desc' });
+    useSettingsStore.setState({ displayStarredFirst: false });
+
+    // All images have the exact same prompt
+    const images: IndexedImage[] = [
+      createImage({ id: '1', prompt: 'a cat', lastModified: 1000, stackGroupId: 'cat-hash' }),
+      createImage({ id: '2', prompt: 'a cat', lastModified: 900, stackGroupId: 'cat-hash' }),
+    ];
+
+    const { result } = renderHook(() => useImageStacking(images, true));
+    const stacked = result.current.stackedItems;
+
+    expect(stacked.length).toBe(1);
+
+    const stack = stacked[0] as any;
+    expect(stack.images.length).toBe(2);
+
+    // Even a single-prompt stack gets subGroups (so the prompt is always displayed)
+    expect(stack.subGroups).toBeDefined();
+    expect(stack.subGroups.length).toBe(1);
+    expect(stack.subGroups[0].prompt).toBe('a cat');
+    expect(stack.subGroups[0].size).toBe(2);
   });
 });

@@ -28,6 +28,7 @@ import GridToolbar from './components/GridToolbar';
 import TopMenuBar from './components/TopMenuBar';
 
 import ImageTable from './components/ImageTable';
+import SimilarityStackExpandedView from './components/SimilarityStackExpandedView';
 
 import { normalizePath } from './utils/pathUtils';
 
@@ -883,24 +884,8 @@ export default function App() {
         <div className={`flex-1 flex flex-col transition-[margin,width] duration-300 ease-in-out overflow-hidden ${previewImage ? 'mr-96' : 'mr-0'}`}
              style={{ marginLeft: layoutOffset }}>
           <main className="flex-1 overflow-hidden relative flex flex-col">
-            {/* Back from Stack Button - Now outside header */}
-            {activeView === 'library' && libraryStackContext && (
-              <div className="px-6 py-2 bg-gray-900/40 border-b border-gray-800/40 flex items-center shrink-0">
-                <button
-                  onClick={() => {
-                    setStackingEnabled(true);
-                    setLibraryStackContext(null);
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/10 text-blue-400 rounded-md hover:bg-blue-500/20 transition-all text-xs font-medium border border-blue-500/20 shadow-sm"
-                >
-                  <ArrowLeft size={14} />
-                  <span>Library</span>
-                </button>
-                <div className="ml-3 text-xs text-gray-400 truncate">
-                  Viewing stack: <span className="text-gray-200 font-mono">{libraryStackContext.basePrompt}</span>
-                </div>
-              </div>
-            )}
+            {/* Back from Stack Button — now handled inside SimilarityStackExpandedView */}
+            {/* (libraryStackContext drill-down renders its own back bar) */}
 
             <div className="flex-1 overflow-y-auto min-h-0 bg-gray-900/40 scrollbar-adaptive">
               {error && (
@@ -981,7 +966,18 @@ export default function App() {
                     />
                   ) : (
                     <div className="h-full">
-                      {viewMode === 'grid' ? (
+                      {libraryStackContext ? (
+                        <SimilarityStackExpandedView
+                          images={safeFilteredImages}
+                          subGroups={libraryStackContext.subGroups || []}
+                          onImageClick={handleImageSelection}
+                          selectedImages={safeSelectedImages}
+                          onBack={() => {
+                            setStackingEnabled(true);
+                            setLibraryStackContext(null);
+                          }}
+                        />
+                      ) : viewMode === 'grid' ? (
                         <ImageGrid
                           images={safeFilteredImages}
                           onImageClick={handleImageSelection}

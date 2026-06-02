@@ -1129,13 +1129,31 @@ export interface StackViewState {
 
 
 /**
- * Stack of images grouped by similar prompt
+ * Sub-group within a stack — images sharing the exact same prompt.
+ * A similarity-based stack may contain multiple sub-groups, each with
+ * its own prompt label displayed above its images in the drill-down view.
+ */
+export interface StackSubGroup {
+  promptHash: string;       // FNV-1a hash of the exact normalized prompt
+  prompt: string;           // The exact prompt text for display above images
+  imageIds: string[];       // Image IDs in this sub-group
+  coverImageId: string;     // First image chronologically (used as thumbnail)
+  size: number;             // Number of images in this sub-group
+}
+
+/**
+ * Stack of images grouped by similar prompt.
+ * When similarity merging is active, subGroups contains one entry per
+ * distinct exact prompt within the similarity group. Each sub-group's
+ * prompt is displayed above its images in the drill-down view.
  */
 export interface ImageStack {
   id: string; // Unique stack ID (e.g. "stack-" + coverImage.id)
   coverImage: IndexedImage; // The representative image (first in group)
   images: IndexedImage[]; // All images in this stack
   count: number; // Total number of images in stack
+  subGroups?: StackSubGroup[]; // Sub-groups by exact prompt within this similarity stack
+  basePrompt?: string; // Representative prompt for the similarity group (for the back bar)
 }
 
 /**
@@ -1147,4 +1165,5 @@ export interface LibraryStackContext {
   stackId: string;
   imageIds: string[];
   basePrompt: string;
+  subGroups?: { promptHash: string; prompt: string; imageIds: string[] }[]; // Sub-group metadata for drill-down display
 }

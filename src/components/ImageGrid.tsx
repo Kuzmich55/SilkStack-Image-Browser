@@ -52,6 +52,10 @@ class GridErrorBoundary extends React.Component<{children: React.ReactNode}, {ha
   }
 }
 
+// Module-level scroll position — survives ImageGrid unmount/remount during
+// stack drill-down (when SimilarityStackExpandedView replaces the grid).
+let moduleMainLibraryScrollPosition = 0;
+
 // --- ImageCard Component ---
 interface ImageCardProps {
   image: IndexedImage;
@@ -550,7 +554,6 @@ const ImageGrid: React.FC<ImageGridProps & { width: number; height: number }> = 
   const setStackingEnabled = useImageStore((state) => state.setStackingEnabled);
   const setLibraryStackContext = useImageStore((state) => state.setLibraryStackContext);
   const libraryStackContext = useImageStore((state) => state.libraryStackContext);
-  const mainLibraryScrollPositionRef = useRef<number>(0);
   const pendingRestoreStackScrollRef = useRef<boolean>(false);
   const prevLibraryStackContextRef = useRef<LibraryStackContext | null>(null);
 
@@ -629,7 +632,7 @@ const ImageGrid: React.FC<ImageGridProps & { width: number; height: number }> = 
   React.useLayoutEffect(() => {
     if (pendingRestoreStackScrollRef.current && gridRef.current) {
       if (rows.length > 0 || itemsToRender.length === 0) {
-        const savedPos = mainLibraryScrollPositionRef.current;
+        const savedPos = moduleMainLibraryScrollPosition;
 
         // Reset the virtualized list cache completely from index 0
         // to ensure perfect, pixel-precise height and offset calculations
@@ -1293,17 +1296,25 @@ const ImageGrid: React.FC<ImageGridProps & { width: number; height: number }> = 
   const handleStackClick = React.useCallback((stack: ImageStack) => {
     // Save current scroll position of the grid before entering the stack
     if (gridRef.current) {
-      mainLibraryScrollPositionRef.current = gridRef.current.scrollTop;
+      moduleMainLibraryScrollPosition = gridRef.current.scrollTop;
     }
 
     // Build ID-based stack context — filters by explicit image IDs instead of
     // polluting the search bar. This supports future manual image addition.
-    const prompt = stack.coverImage.metadata?.normalizedMetadata?.prompt || stack.coverImage.metadata?.positive_prompt;
+    const prompt = stack.basePrompt
+      || stack.coverImage.metadata?.normalizedMetadata?.prompt
+      || stack.coverImage.metadata?.positive_prompt;
     if (prompt && stack.images.length > 0) {
         const context: LibraryStackContext = {
           stackId: stack.id,
           imageIds: stack.images.map(img => img.id),
           basePrompt: prompt,
+          // Pass sub-group info for prompt-grouped drill-down display
+          subGroups: stack.subGroups?.map(sg => ({
+            promptHash: sg.promptHash,
+            prompt: sg.prompt,
+            imageIds: sg.imageIds,
+          })),
         };
         setLibraryStackContext(context);
         setStackingEnabled(false); // Disable stacking when drilling down to see individual items

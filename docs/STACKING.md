@@ -32,20 +32,21 @@ SilkStack provides two complementary systems for grouping similar images: **Libr
 | Feature | Library Stacks | Smart Library Clusters |
 |---|---|---|
 | **Where** | Main library grid | Smart Library view |
-| **Grouping method** | Exact prompt hash (FNV-1a) | 4-phase similarity algorithm |
-| **Performance** | O(n) — `useMemo` per render | O(n²) within buckets — Web Worker |
+| **Grouping method** | Exact prompt hash (FNV-1a) + similarity merge (hybrid Jaccard/Levenshtein, 0.85) | 4-phase similarity algorithm |
+| **Performance** | O(n + g²) within buckets — `useMemo` per render (cached) | O(n²) within buckets — Web Worker |
 | **Persistence** | IndexedDB per-image annotations | JSON file cache via `clusterCacheManager` |
 | **Persistence pattern** | Same as auto-tags (`ImageAnnotations`) | Separate `{hash}-clusters.json` file |
-| **Drill-down** | In-grid via `LibraryStackContext` | Overlay via `StackExpandedView` |
+| **Drill-down** | `SimilarityStackExpandedView` with prompt-grouped sections | Overlay via `StackExpandedView` |
 | **Membership model** | `stackGroupId` per image (prompt hash) | Explicit `imageIds: string[]` per cluster |
-| **Threshold** | Exact match only | Configurable (default 0.88) |
+| **Threshold** | Exact match + similarity merge (0.85) | Configurable (default 0.88) |
 | **Minimum size** | 2 images | 3 images |
+| **Sub-groups** | `StackSubGroup[]` — one per distinct prompt, always displayed | N/A |
 
 ---
 
 ## Library Stacks
 
-Library stacks are the default grouping behavior in the main grid. When stacking is enabled, images with the same prompt hash are visually grouped into a stacked card with a `+N` badge.
+Library stacks are the default grouping behavior in the main grid. When stacking is enabled, images with similar prompts are visually grouped into a stacked card with a `+N` badge. The grouping uses exact prompt hash matching combined with a similarity-based merge pass (hybrid Jaccard/Levenshtein at threshold 0.85).
 
 Unlike the previous ephemeral design, stack membership now follows the **same per-image annotation pattern as auto-tags**: each image's `ImageAnnotations` record in IndexedDB stores a `stackGroupId` (prompt hash) and an `isStackAnalyzed` flag. This means stack data survives app restarts without a separate cache file.
 
@@ -140,23 +141,32 @@ There is no separate `libraryStacks` array or `stackAnalyzedImageIds` Set in the
 
 ### Stack Drill-Down
 
-When a user clicks a stack in the library grid, the app drills down to show individual images. This is handled by `handleStackClick` in [`ImageGrid.tsx`](../src/components/ImageGrid.tsx).
+When a user clicks a stack in the library grid, the app drills down to show images organized by prompt sub-groups. This is handled by `handleStackClick` in [`ImageGrid.tsx`](../src/components/ImageGrid.tsx) and rendered by [`SimilarityStackExpandedView`](../src/components/SimilarityStackExpandedView.tsx).
 
 **Flow:**
 
 ```
 User clicks stack card
   │
-  ├─ 1. Save scroll position (mainLibraryScrollPositionRef)
-  ├─ 2. Build LibraryStackContext { stackId, imageIds, basePrompt }
-  ├─ 3. setLibraryStackContext(context) → triggers filterAndSort
-  └─ 4. setStackingEnabled(false) → grid shows raw images
+  ├─ 1. Save scroll position (moduleMainLibraryScrollPosition)
+  ├─ 2. Build LibraryStackContext { stackId, imageIds, basePrompt, subGroups }
+  ├─ 3. setLibraryStackContext(context) → triggers filterAndSort (ID-based filtering)
+  ├─ 4. setStackingEnabled(false)
+  └─ 5. App.tsx renders SimilarityStackExpandedView instead of ImageGrid
+       │
+       ├─ Back to Library button (replaces old App.tsx back bar)
+       ├─ For each sub-group:
+       │   ├─ Prompt header panel (prompt text + image count)
+       │   └─ Flexbox grid of image cards
+       └─ Scroll position restored on back
 ```
 
 The key design decision: **drill-down uses ID-based filtering, not text-based filtering.** This means:
 - The search bar is NOT modified — any prior search is preserved
 - Filtering is O(1) per image (Set lookup vs. text matching)
 - Manual image addition is possible (push an ID into `imageIds`)
+
+**Sub-group display**: Every stack drill-down now shows prompt headers, even for single-prompt stacks. This makes prompt text always visible above its images, letting users see exactly what prompt generated each group.
 
 ### LibraryStackContext
 
@@ -291,10 +301,10 @@ Unlike library stacks, cluster drill-down uses **local component state** and an 
 | **Trigger** | Toggle in grid toolbar | "Generate Clusters" button |
 | **Speed** | Instant (annotation lookup or exact match) | 4-phase worker, ~30s for 35k images |
 | **Grouping** | Exact prompt hash | Similarity threshold 0.88 |
-| **Drill-down mechanism** | `LibraryStackContext` in store | `expandedClusterId` local state |
+| **Drill-down mechanism** | `LibraryStackContext` in store → `SimilarityStackExpandedView` | `expandedClusterId` local state |
 | **Filtering** | ID-based Set lookup | Explicit image array prop |
 | **Search bar** | Preserved | N/A (separate view) |
-| **Scroll restore** | `useLayoutEffect` watching context | `setTimeout` 30ms + ref |
+| **Scroll restore** | Module-level variable survives grid unmount | `setTimeout` 30ms + ref |
 | **Navigation context** | Not supported | `clusterNavigationContext` for prev/next |
 | **Manual editing** | Possible via annotation mutation | Not yet supported |
 | **Persistence** | IndexedDB per-image (`ImageAnnotations`) | JSON file cache (`clusterCacheManager`) |
@@ -307,10 +317,11 @@ Unlike library stacks, cluster drill-down uses **local component state** and an 
 
 | File | Role |
 |---|---|
-| [`src/types.ts`](../src/types.ts) | `ImageStack`, `LibraryStackContext`, `ImageCluster`, `ImageAnnotations` (with `stackGroupId`/`isStackAnalyzed`) |
-| [`src/hooks/useImageStacking.ts`](../src/hooks/useImageStacking.ts) | Two-path grouping: annotation-based + exact prompt fallback, `sortItems` shared sort |
+| [`src/types.ts`](../src/types.ts) | `ImageStack`, `StackSubGroup`, `LibraryStackContext`, `ImageCluster`, `ImageAnnotations` (with `stackGroupId`/`isStackAnalyzed`) |
+| [`src/hooks/useImageStacking.ts`](../src/hooks/useImageStacking.ts) | Two-path grouping, similarity merge algorithm (`computeSimilarityMerge`), sub-group construction (`buildStackResult`), Union-Find |
+| [`src/components/SimilarityStackExpandedView.tsx`](../src/components/SimilarityStackExpandedView.tsx) | Drill-down view with prompt-grouped sections: prompt header panels + image card grids |
 | [`src/store/useImageStore.ts`](../src/store/useImageStore.ts) | `libraryStackContext` state, `syncNewImagesToStacks`, `handleStackImageDeletion`, `applyAnnotationsToImages` (denormalizes `stackGroupId`), `filterAndSort` pipeline |
-| [`src/components/ImageGrid.tsx`](../src/components/ImageGrid.tsx) | `handleStackClick`, scroll restore, stack card rendering |
+| [`src/components/ImageGrid.tsx`](../src/components/ImageGrid.tsx) | `handleStackClick` (passes `subGroups` in context), scroll restore (module-level variable), stack card rendering |
 | [`src/App.tsx`](../src/App.tsx) | "Back to all stacks" bar, indexing-completion trigger, file watcher triggers |
 | [`src/services/imageAnnotationsStorage.ts`](../src/services/imageAnnotationsStorage.ts) | `bulkSaveAnnotations`, `loadAllAnnotations` — canonical persistence for stack fields |
 | [`src/services/clusteringEngine.ts`](../src/services/clusteringEngine.ts) | 4-phase clustering algorithm, `addImageToClusters`, `removeImagesFromClusters` |
@@ -342,13 +353,77 @@ Future work:
 - Drag-and-drop images between stacks
 - Multi-select → "Move to Stack" context menu action
 - Remove individual images from a stack (clear `stackGroupId`)
+- "Re-analyze stacks" button to clear `isStackAnalyzed` and trigger full re-processing with similarity
 
-### Similarity-Based Stacking in Library
+---
 
-The library currently uses exact prompt hash matching via `generatePromptHash`. The data model supports similarity: `stackGroupId` is just a string, and `getPromptKey` in the fallback path normalizes text. To add similarity grouping:
-- Integrate `hybridSimilarity` from [`similarityMetrics.ts`](../src/utils/similarityMetrics.ts) into `syncNewImagesToStacks`
-- Instead of exact hash match, check each new image against existing stack `basePrompt` values using the similarity threshold
-- This would make library stacks use the same similarity logic as Smart Library clusters, but incrementally
+## Similarity-Based Stacking (Implemented)
+
+The **Similarity-Based Stacking** feature brings Smart Library clustering logic into the Library stacks. Instead of grouping images only by exact prompt match, stacks now use a lightweight similarity algorithm to merge similar prompts into the same stack, while preserving exact-prompt sub-groups with their own labels in the drill-down view.
+
+### How It Works
+
+The similarity merge runs at the **display layer** in `useImageStacking`, keeping the persistence layer (`syncNewImagesToStacks`, IndexedDB `stackGroupId`) as exact-hash only. This means:
+
+- No data migration — existing `stackGroupId` values remain valid
+- Similarity grouping is computed on the fly with a module-level cache
+- Threshold tuning doesn't require re-indexing
+
+### Algorithm
+
+The similarity merge uses the same hybrid approach as Smart Library clusters, scoped to the currently visible images:
+
+1. **Exact grouping** — images are first grouped by `stackGroupId` (exact prompt hash)
+2. **Token bucketing** — groups are bucketed by shared keywords (≥2) using `shareKeywords()` from `similarityMetrics.ts`
+3. **Similarity scoring** — within each bucket, pairs are compared using `hybridSimilarity()` (Jaccard × 0.6 + Levenshtein × 0.4)
+4. **Union-Find merge** — groups with score ≥ 0.85 are merged transitively
+5. **Sub-group construction** — original exact-match groups become `StackSubGroup[]` within the merged stack
+
+### Data Types
+
+```typescript
+interface StackSubGroup {
+  promptHash: string;       // FNV-1a hash of the exact prompt
+  prompt: string;           // The exact prompt text for display
+  imageIds: string[];       // Image IDs in this sub-group
+  coverImageId: string;     // First image chronologically
+  size: number;             // Number of images
+}
+
+// ImageStack gains optional fields:
+interface ImageStack {
+  // ... existing fields ...
+  subGroups?: StackSubGroup[];  // Sub-groups by exact prompt
+  basePrompt?: string;          // Representative prompt for the back bar
+}
+
+// LibraryStackContext gains optional subGroups for drill-down:
+interface LibraryStackContext {
+  // ... existing fields ...
+  subGroups?: { promptHash: string; prompt: string; imageIds: string[] }[];
+}
+```
+
+### Drill-Down View
+
+When a user clicks a stack, `SimilarityStackExpandedView` replaces the flat `ImageGrid`. The component renders:
+
+- A "Back to Library" bar (replaces the old App.tsx back bar)
+- Sub-group sections, each with:
+  - A **prompt header panel** showing the exact prompt text in monospace
+  - An **image count** badge
+  - A **flexbox grid** of thumbnail cards for that sub-group's images
+
+Every stack gets `subGroups` populated — even single-prompt stacks get one sub-group, so the prompt label is always displayed above its images.
+
+### Key Files
+
+| File | Role |
+|---|---|
+| `src/hooks/useImageStacking.ts` | Similarity merge algorithm, `buildStackResult`, `computeSimilarityMerge` |
+| `src/components/SimilarityStackExpandedView.tsx` | Drill-down view with prompt-grouped sections |
+| `src/types.ts` | `StackSubGroup`, updated `ImageStack` and `LibraryStackContext` |
+| `src/utils/similarityMetrics.ts` | Reused: `hybridSimilarity`, `shareKeywords`, `tokenizeForSimilarity`, `generatePromptHash`, `normalizePrompt` |
 
 ---
 
