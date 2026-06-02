@@ -277,6 +277,25 @@ export default function App() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
+  // Escape from stack view back to library
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      // Don't intercept if a modal, input, or textarea is focused
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.contentEditable === 'true') return;
+
+      const { libraryStackContext, setStackingEnabled, setLibraryStackContext } = useImageStore.getState();
+      if (libraryStackContext) {
+        e.preventDefault();
+        setStackingEnabled(true);
+        setLibraryStackContext(null);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
   // Initialize the cache manager on startup
   useEffect(() => {
     const initializeCache = async () => {
@@ -875,7 +894,7 @@ export default function App() {
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/10 text-blue-400 rounded-md hover:bg-blue-500/20 transition-all text-xs font-medium border border-blue-500/20 shadow-sm"
                 >
                   <ArrowLeft size={14} />
-                  <span>Back to all stacks</span>
+                  <span>Library</span>
                 </button>
                 <div className="ml-3 text-xs text-gray-400 truncate">
                   Viewing stack: <span className="text-gray-200 font-mono">{libraryStackContext.basePrompt}</span>
