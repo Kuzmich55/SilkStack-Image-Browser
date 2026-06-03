@@ -2202,8 +2202,10 @@ export const useImageStore = create<ImageState>((set, get) => {
                     }
                     if (resetAnnotations.length > 0) {
                         await bulkSaveAnnotations(resetAnnotations);
-                        const imagesWithAnnotations = applyAnnotationsToImages(state.images, resetMap);
-                        const filteredResult = filterAndSort({ ...state, images: imagesWithAnnotations, annotations: resetMap });
+                        const currentImages = get().images;
+                        const currentState = get();
+                        const imagesWithAnnotations = applyAnnotationsToImages(currentImages, resetMap);
+                        const filteredResult = filterAndSort({ ...currentState, images: imagesWithAnnotations, annotations: resetMap });
                         const availableFilters = recalculateAvailableFilters(filteredResult.filteredImages);
                         set({ ...filteredResult, ...availableFilters, images: imagesWithAnnotations, annotations: resetMap });
                         console.log(`[SimilarityGroups] Reset ${resetAnnotations.length} similarityGroupId values`);
@@ -2953,8 +2955,10 @@ export const useImageStore = create<ImageState>((set, get) => {
                     // Persist to IndexedDB (same path as auto-tags)
                     await bulkSaveAnnotations(updatedAnnotations);
 
-                    // Update in-memory state
-                    const imagesWithAnnotations = applyAnnotationsToImages(images, newAnnotations);
+                    // Update in-memory state — use get().images so we don't overwrite
+                    // thumbnail URLs loaded concurrently during IndexedDB write.
+                    const currentImages = get().images;
+                    const imagesWithAnnotations = applyAnnotationsToImages(currentImages, newAnnotations);
                     const filteredResult = filterAndSort({ ...state, images: imagesWithAnnotations, annotations: newAnnotations });
                     const availableFilters = recalculateAvailableFilters(filteredResult.filteredImages);
 
@@ -3129,8 +3133,11 @@ export const useImageStore = create<ImageState>((set, get) => {
 
                     if (updatedAnnotations.length > 0) {
                         await bulkSaveAnnotations(updatedAnnotations);
-                        const imagesWithAnnotations = applyAnnotationsToImages(images, newAnnotations);
-                        const filteredResult = filterAndSort({ ...state, images: imagesWithAnnotations, annotations: newAnnotations });
+                        // Use get().images to preserve thumbnail URLs loaded during async work
+                        const currentImages = get().images;
+                        const imagesWithAnnotations = applyAnnotationsToImages(currentImages, newAnnotations);
+                        const currentState = get();
+                        const filteredResult = filterAndSort({ ...currentState, images: imagesWithAnnotations, annotations: newAnnotations });
                         const availableFilters = recalculateAvailableFilters(filteredResult.filteredImages);
                         set({ ...filteredResult, ...availableFilters, images: imagesWithAnnotations, annotations: newAnnotations });
                     }
@@ -3250,8 +3257,12 @@ export const useImageStore = create<ImageState>((set, get) => {
                 if (updatedAnnotations.length > 0) {
                     await bulkSaveAnnotations(updatedAnnotations);
 
-                    const imagesWithAnnotations = applyAnnotationsToImages(images, newAnnotations);
-                    const filteredResult = filterAndSort({ ...state, images: imagesWithAnnotations, annotations: newAnnotations });
+                    // Use get().images to preserve thumbnail URLs loaded during
+                    // the async similarity computation (which can take minutes).
+                    const currentImages = get().images;
+                    const currentState = get();
+                    const imagesWithAnnotations = applyAnnotationsToImages(currentImages, newAnnotations);
+                    const filteredResult = filterAndSort({ ...currentState, images: imagesWithAnnotations, annotations: newAnnotations });
                     const availableFilters = recalculateAvailableFilters(filteredResult.filteredImages);
 
                     set({
