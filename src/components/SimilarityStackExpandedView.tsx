@@ -1,13 +1,21 @@
-import React from 'react';
-import { ArrowLeft } from 'lucide-react';
+import React, { useRef, useState, useEffect, useMemo, useCallback } from 'react';
+import { ArrowLeft, Star, Square, CheckSquare } from 'lucide-react';
 import { IndexedImage } from '../types';
 import { useThumbnail } from '../hooks/useThumbnail';
+import { useSettingsStore } from '../store/useSettingsStore';
+import { useImageStore } from '../store/useImageStore';
+import { computeJustifiedLayout, getItemAspectRatio, type LayoutRow } from '../utils/layoutAlgo';
+
+// ── Constants (matching ImageGrid) ─────────────────────────────────────
+
+const GAP_SIZE = 8;
+const CONTAINER_PADDING = 36; // Matches ImageGrid: p-2 (16px) + scrollbar (17px) + buffer
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
 const VIDEO_EXTENSIONS = ['.mp4', '.webm', '.mkv', '.mov', '.avi'];
 
-const isVideo = (img: IndexedImage): boolean => {
+const isVideoFile = (img: IndexedImage): boolean => {
   if (img.fileType?.startsWith('video/')) return true;
   const name = (img.name || '').toLowerCase();
   return VIDEO_EXTENSIONS.some(ext => name.endsWith(ext));
@@ -26,38 +34,94 @@ const SubGroupImageCard: React.FC<SubGroupImageCardProps> = React.memo(({
   isSelected,
   onClick,
 }) => {
-  // Trigger thumbnail generation — same hook used by ImageCard in ImageGrid
   useThumbnail(image);
+
+  const [imageUrl, setImageUrl] = useState<string | null>(() => {
+    if (image.thumbnailStatus === 'ready' && image.thumbnailUrl) return image.thumbnailUrl;
+    if (isVideoFile(image)) return null;
+    return null;
+  });
+
+  const thumbnailsDisabled = useSettingsStore((state) => state.disableThumbnails);
+  const toggleFavorite = useImageStore((state) => state.toggleFavorite);
+  const toggleImageSelection = useImageStore((state) => state.toggleImageSelection);
+
+  // React to thumbnail becoming ready
+  useEffect(() => {
+    if (thumbnailsDisabled) {
+      setImageUrl(null);
+      return;
+    }
+    if (image.thumbnailStatus === 'ready' && image.thumbnailUrl) {
+      setImageUrl(image.thumbnailUrl);
+    }
+  }, [image.thumbnailStatus, image.thumbnailUrl, thumbnailsDisabled]);
+
+  const handleFavoriteClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    toggleFavorite(image.id);
+  };
+
+  const handleCheckboxClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    toggleImageSelection(image.id);
+  };
 
   return (
     <div
-      className={`relative group cursor-pointer rounded-lg overflow-hidden border-2 transition-all flex-shrink-0 ${
+      className={`relative group flex items-center justify-center bg-gray-800 rounded-lg overflow-hidden cursor-pointer transition-all duration-300 ease-out border border-gray-700/50 ${
         isSelected
-          ? 'border-blue-500 shadow-lg shadow-blue-500/20 ring-1 ring-blue-500/30'
-          : 'border-gray-700/50 hover:border-gray-500 hover:shadow-md'
+          ? 'ring-4 ring-blue-500 ring-opacity-75 shadow-lg shadow-blue-500/20 translate-y-[-2px]'
+          : 'hover:shadow-2xl hover:shadow-black/50 hover:border-gray-600 hover:translate-y-[-4px]'
       }`}
-      style={{ width: 180, height: 180 }}
+      style={{ width: '100%', height: '100%', flexShrink: 0 }}
       onClick={(e) => onClick(image, e)}
-      title={image.name || ''}
     >
-      {/* Thumbnail image */}
-      {image.thumbnailUrl && !isVideo(image) ? (
+      {/* Selection checkbox */}
+      <button
+        onClick={handleCheckboxClick}
+        className={`absolute top-2 left-2 z-20 p-1 rounded transition-all focus:outline-none ${
+          isSelected
+            ? 'bg-blue-500 text-white opacity-100'
+            : 'bg-black/50 text-white opacity-0 group-hover:opacity-100 hover:bg-blue-500/80'
+        }`}
+        title={isSelected ? 'Deselect image' : 'Select image'}
+      >
+        {isSelected ? <CheckSquare className="h-5 w-5" /> : <Square className="h-5 w-5" />}
+      </button>
+
+      {/* Favorite button */}
+      <button
+        onClick={handleFavoriteClick}
+        className={`absolute top-2 right-2 z-10 p-1.5 rounded-full transition-all focus:outline-none ${
+          image.isFavorite
+            ? 'bg-yellow-500/80 text-white opacity-100 hover:bg-yellow-600'
+            : 'bg-black/50 text-white opacity-0 group-hover:opacity-100 hover:bg-yellow-500'
+        }`}
+        title={image.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+      >
+        <Star className={`h-4 w-4 ${image.isFavorite ? 'fill-current' : ''}`} />
+      </button>
+
+      {/* Image content */}
+      {imageUrl ? (
         <img
-          src={image.thumbnailUrl}
+          src={imageUrl}
           alt={image.name || 'Image'}
-          className="w-full h-full object-cover"
+          className="w-full h-full object-contain"
           loading="lazy"
+          draggable={false}
         />
-      ) : isVideo(image) ? (
-        <div className="w-full h-full bg-gray-800 flex flex-col items-center justify-center gap-1">
-          <svg className="w-8 h-8 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      ) : isVideoFile(image) ? (
+        <div className="w-full h-full flex flex-col items-center justify-center gap-1 bg-gray-900">
+          <svg className="w-10 h-10 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
-          <span className="text-xs text-gray-500">Video</span>
+          <span className="text-[10px] text-gray-500">Video</span>
         </div>
       ) : (
-        <div className="w-full h-full bg-gray-800 flex items-center justify-center">
+        <div className="w-full h-full flex items-center justify-center bg-gray-900">
           <div className="flex flex-col items-center gap-1">
             <div className="w-6 h-6 border-2 border-gray-600 border-t-gray-400 rounded-full animate-spin" />
             <span className="text-[10px] text-gray-500">Loading…</span>
@@ -65,17 +129,10 @@ const SubGroupImageCard: React.FC<SubGroupImageCardProps> = React.memo(({
         </div>
       )}
 
-      {/* Selection indicator */}
-      {isSelected && (
-        <div className="absolute top-2 right-2 bg-blue-500 text-white text-[10px] font-bold w-5 h-5 rounded-md flex items-center justify-center shadow-md">
-          ✓
-        </div>
-      )}
-
       {/* Hover overlay with filename */}
       <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
         <p className="text-[10px] text-white truncate leading-tight">
-          {image.name}
+          {(image.name || '').split(/[/\\]/).pop() || 'Unknown'}
         </p>
       </div>
     </div>
@@ -83,6 +140,38 @@ const SubGroupImageCard: React.FC<SubGroupImageCardProps> = React.memo(({
 });
 
 SubGroupImageCard.displayName = 'SubGroupImageCard';
+
+// ── Justified row of images ────────────────────────────────────────────
+
+interface JustifiedRowProps {
+  row: LayoutRow;
+  selectedImages: Set<string>;
+  onImageClick: (image: IndexedImage, event: React.MouseEvent) => void;
+}
+
+const JustifiedRow: React.FC<JustifiedRowProps> = React.memo(({ row, selectedImages, onImageClick }) => {
+  return (
+    <div className="flex flex-row" style={{ height: row.height, gap: GAP_SIZE }}>
+      {row.items.map((item) => {
+        const image = 'coverImage' in item ? item.coverImage : item;
+        const aspectRatio = getItemAspectRatio(item);
+        const itemWidth = row.height * aspectRatio;
+
+        return (
+          <div key={image.id} style={{ width: itemWidth, height: row.height, flexShrink: 0 }}>
+            <SubGroupImageCard
+              image={image}
+              isSelected={selectedImages.has(image.id)}
+              onClick={onImageClick}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+});
+
+JustifiedRow.displayName = 'JustifiedRow';
 
 // ── Main view ──────────────────────────────────────────────────────────
 
@@ -97,11 +186,9 @@ interface SimilarityStackExpandedViewProps {
 /**
  * Drill-down view for a similarity-based library stack.
  *
- * Renders sub-groups of images organized by their exact prompt. Each sub-group
- * displays the prompt in a header panel above its images, making it easy to see
- * how prompts vary within a similarity group.
- *
- * Replaces the flat ImageGrid when drilling into a stack that has subGroups.
+ * Renders sub-groups of images organized by their exact prompt, using the same
+ * justified layout algorithm as ImageGrid. Each sub-group displays its prompt
+ * in a header panel above its rows of images.
  */
 const SimilarityStackExpandedView: React.FC<SimilarityStackExpandedViewProps> = ({
   images,
@@ -110,8 +197,10 @@ const SimilarityStackExpandedView: React.FC<SimilarityStackExpandedViewProps> = 
   selectedImages,
   onBack,
 }) => {
-  // Build a map from imageId to image for quick lookup within sub-groups
-  const imageMap = React.useMemo(() => {
+  const imageSize = useSettingsStore((state) => state.viewZoomLevels.library);
+
+  // Build a map from imageId to image for quick lookup
+  const imageMap = useMemo(() => {
     const map = new Map<string, IndexedImage>();
     for (const img of images) {
       map.set(img.id, img);
@@ -119,9 +208,33 @@ const SimilarityStackExpandedView: React.FC<SimilarityStackExpandedViewProps> = 
     return map;
   }, [images]);
 
+  // Measure available width for justified layout
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const w = entry.contentRect.width;
+        if (w > 0) setContainerWidth(w);
+      }
+    });
+
+    observer.observe(el);
+    // Initial measurement
+    if (el.clientWidth > 0) setContainerWidth(el.clientWidth);
+
+    return () => observer.disconnect();
+  }, []);
+
+  const availableWidth = Math.max(1, containerWidth - CONTAINER_PADDING);
+
   return (
     <div className="flex flex-col h-full">
-      {/* Header bar — replaces the default "Back to stacks" bar */}
+      {/* Header bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 flex-shrink-0 px-6 py-2 bg-gray-900/40 border-b border-gray-800/40">
         <button
           type="button"
@@ -139,8 +252,8 @@ const SimilarityStackExpandedView: React.FC<SimilarityStackExpandedViewProps> = 
         </div>
       </div>
 
-      {/* Scrollable sub-group sections */}
-      <div className="flex-1 overflow-y-auto min-h-0 scrollbar-adaptive">
+      {/* Scrollable content with justified rows */}
+      <div ref={containerRef} className="flex-1 overflow-y-auto min-h-0 scrollbar-adaptive">
         {subGroups.length === 0 && (
           <div className="flex items-center justify-center h-full">
             <p className="text-sm text-gray-500">No prompt sub-groups found.</p>
@@ -155,9 +268,14 @@ const SimilarityStackExpandedView: React.FC<SimilarityStackExpandedViewProps> = 
 
           if (sgImages.length === 0) return null;
 
+          // Compute justified layout using the same algorithm as ImageGrid
+          const rows = availableWidth > 0
+            ? computeJustifiedLayout(sgImages, availableWidth, imageSize, GAP_SIZE)
+            : [];
+
           return (
             <div key={sg.promptHash} className="mb-2">
-              {/* Prompt header panel — styled like StackExpandedView's cluster prompt */}
+              {/* Prompt header panel */}
               <div className="mx-6 mt-4 bg-gray-900/60 border border-gray-800 rounded-xl p-4">
                 <div className="flex items-center justify-between mb-1">
                   <h3 className="text-sm font-semibold text-gray-100">Prompt</h3>
@@ -170,24 +288,25 @@ const SimilarityStackExpandedView: React.FC<SimilarityStackExpandedViewProps> = 
                 </p>
               </div>
 
-              {/* Image cards for this sub-group */}
-              <div className="px-6 mt-3">
-                <div className="flex flex-row flex-wrap gap-2">
-                  {sgImages.map((img) => (
-                    <SubGroupImageCard
-                      key={img.id}
-                      image={img}
-                      isSelected={selectedImages.has(img.id)}
-                      onClick={onImageClick}
-                    />
+              {/* Justified image rows (matching ImageGrid layout exactly) */}
+              {rows.length > 0 && (
+                <div className="px-3 mt-3" style={{ paddingRight: 12, paddingLeft: 12 }}>
+                  {rows.map((row, rowIndex) => (
+                    <div key={rowIndex} style={{ marginBottom: GAP_SIZE }}>
+                      <JustifiedRow
+                        row={row}
+                        selectedImages={selectedImages}
+                        onImageClick={onImageClick}
+                      />
+                    </div>
                   ))}
                 </div>
-              </div>
+              )}
             </div>
           );
         })}
 
-        {/* Bottom padding for scroll comfort */}
+        {/* Bottom padding */}
         <div className="h-8" />
       </div>
     </div>

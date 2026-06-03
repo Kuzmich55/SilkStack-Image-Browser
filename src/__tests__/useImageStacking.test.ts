@@ -180,6 +180,33 @@ describe('useImageStacking Hook', () => {
     expect(stack.basePrompt).toBe('a cat sitting on a chair');
   });
 
+  it('groups by similarityGroupId when available (post-computation)', () => {
+    useImageStore.setState({ sortOrder: 'date-desc' });
+    useSettingsStore.setState({ displayStarredFirst: false });
+
+    // Two different stackGroupIds merged into one similarityGroupId
+    const images: IndexedImage[] = [
+      createImage({ id: '1', prompt: 'a cat sitting', lastModified: 1000, stackGroupId: 'hash-cat-sit', similarityGroupId: 'hash-cat-sit' }),
+      createImage({ id: '2', prompt: 'a cat sleeping', lastModified: 900, stackGroupId: 'hash-cat-sleep', similarityGroupId: 'hash-cat-sit' }),
+      createImage({ id: '3', prompt: 'a dog running', lastModified: 800, stackGroupId: 'hash-dog', similarityGroupId: 'hash-dog' }),
+    ];
+
+    const { result } = renderHook(() => useImageStacking(images, true));
+    const stacked = result.current.stackedItems;
+
+    // Two similarity groups: cat (2 images) and dog (1 image = singleton)
+    expect(stacked.length).toBe(2);
+
+    // First should be the cat stack (2 images from different stackGroupIds merged)
+    const catStack = stacked.find(item => 'coverImage' in item && (item as any).count === 2) as any;
+    expect(catStack).toBeDefined();
+    expect(catStack.images.length).toBe(2);
+    expect(catStack.subGroups).toBeDefined();
+    expect(catStack.subGroups.length).toBe(2); // Two distinct prompts
+    expect(catStack.subGroups[0].prompt).toBe('a cat sitting');
+    expect(catStack.subGroups[1].prompt).toBe('a cat sleeping');
+  });
+
   it('includes subGroups even for single-prompt stacks', () => {
     useImageStore.setState({ sortOrder: 'date-desc' });
     useSettingsStore.setState({ displayStarredFirst: false });

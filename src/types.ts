@@ -958,6 +958,9 @@ export interface IndexedImage {
   // Smart Clustering (Phase 1)
   clusterId?: string; // Cluster this image belongs to
   clusterPosition?: number; // Position within cluster (0 = cover image)
+
+  // Similarity-based stacking (computed post-indexing, persisted in IndexedDB)
+  similarityGroupId?: string; // Similarity group ID — groups images with similar prompts
 }
 
 /**
@@ -973,6 +976,7 @@ export interface ImageAnnotations {
   metadataTags: string[]; // Tags imported from image file metadata
   stackGroupId?: string; // Prompt hash — groups images with identical prompts into stacks
   isStackAnalyzed?: boolean; // Whether the image has been checked for stack membership
+  similarityGroupId?: string; // Similarity group ID — groups images with similar prompts (computed post-indexing)
   addedAt: number; // Timestamp when first annotated
   updatedAt: number; // Timestamp of last update
 }
