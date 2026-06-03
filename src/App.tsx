@@ -126,6 +126,7 @@ export default function App() {
   const autoTaggingProgress = useImageStore((state) => state.autoTaggingProgress);
   const cancelClustering = useImageStore((state) => state.cancelClustering);
   const clusteringProgress = useImageStore((state) => state.clusteringProgress);
+  const similarityGroupProgress = useImageStore((state) => state.similarityGroupProgress);
   const toggleFavorite = useImageStore((state) => state.toggleFavorite);
   const addTagToImage = useImageStore((state) => state.addTagToImage);
   const removeTagFromImage = useImageStore((state) => state.removeTagFromImage);
@@ -1006,6 +1007,7 @@ export default function App() {
               enrichmentProgress={enrichmentProgress}
               autoTaggingProgress={autoTaggingProgress}
               clusteringProgress={clusteringProgress}
+              similarityGroupProgress={similarityGroupProgress}
               onCancelAutoTag={cancelAutoTagging}
               onCancelClustering={cancelClustering}
               showStackingToggle={true}

@@ -223,6 +223,9 @@ interface ImageState {
   isClustering: boolean;
   clusterNavigationContext: IndexedImage[] | null; // Images from currently opened cluster for modal navigation
 
+  // Similarity Grouping State
+  similarityGroupProgress: { current: number; total: number; message: string } | null;
+
   // Auto-Tagging State (Phase 3)
 
   autoTaggingProgress: { current: number; total: number; message: string } | null;
@@ -302,6 +305,7 @@ interface ImageState {
   cancelClustering: () => void;
   setClusters: (clusters: ImageCluster[]) => void;
   setClusteringProgress: (progress: { current: number; total: number; message: string } | null) => void;
+  setSimilarityGroupProgress: (progress: { current: number; total: number; message: string } | null) => void;
   handleClusterImageDeletion: (deletedImageIds: string[]) => void;
   setClusterNavigationContext: (images: IndexedImage[] | null) => void;
 
@@ -1124,6 +1128,9 @@ export const useImageStore = create<ImageState>((set, get) => {
         isClustering: false,
         clusterNavigationContext: null,
 
+        // Similarity Grouping initial value
+        similarityGroupProgress: null,
+
         // Auto-Tagging initial values (Phase 3)
 
         autoTaggingProgress: null,
@@ -1888,6 +1895,8 @@ export const useImageStore = create<ImageState>((set, get) => {
 
         setClusteringProgress: (progress) => set({ clusteringProgress: progress }),
 
+        setSimilarityGroupProgress: (progress) => set({ similarityGroupProgress: progress }),
+
         setClusterNavigationContext: (images) => set({ clusterNavigationContext: images }),
 
         handleClusterImageDeletion: (deletedImageIds: string[]) => {
@@ -2165,8 +2174,9 @@ export const useImageStore = create<ImageState>((set, get) => {
             console.log(`[SimilarityGroups] Annotations loaded: ${annValues.length} total, ${withStackId} with stackGroupId, ${withSimId} with similarityGroupId`);
 
             if (withStackId > 1) {
-                console.log('[SimilarityGroups] Triggering similarity computation...');
-                get().computeSimilarityGroups();
+                console.log('[SimilarityGroups] Scheduling similarity computation (deferred 300ms)...');
+                // Defer so the UI renders first, then compute in background with chunked yielding
+                setTimeout(() => get().computeSimilarityGroups(), 300);
             } else {
                 console.log('[SimilarityGroups] Skipping — need at least 2 unique prompts to merge');
             }
@@ -2911,11 +2921,11 @@ export const useImageStore = create<ImageState>((set, get) => {
 
                     console.log(`Stack analysis complete: ${updatedAnnotations.length} images analyzed`);
 
-                    // After assigning exact stackGroupIds, compute similarity groups
-                    // so similar prompts are merged into the same similarity stack.
-                    // This runs asynchronously to avoid blocking the UI.
+                    // After assigning exact stackGroupIds, schedule similarity
+                    // group computation with a short delay so the grid renders
+                    // first and the UI stays responsive during processing.
                     if (updatedAnnotations.length > 0) {
-                        get().computeSimilarityGroups();
+                        setTimeout(() => get().computeSimilarityGroups(), 200);
                     }
                 }
             } catch (error) {
@@ -2986,7 +2996,13 @@ export const useImageStore = create<ImageState>((set, get) => {
             if ((state as any).__similaritySyncInProgress) return;
             (state as any).__similaritySyncInProgress = true;
 
+            const reportProgress = (current: number, total: number, message: string) => {
+                get().setSimilarityGroupProgress({ current, total, message });
+            };
+
             try {
+                reportProgress(0, 1, 'Loading similarity utilities...');
+
                 const { hybridSimilarity, tokenizeForSimilarity, normalizePrompt, generatePromptHash } =
                     await import('../utils/similarityMetrics');
                 const { bulkSaveAnnotations } = await import('../services/imageAnnotationsStorage');
@@ -2994,8 +3010,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                 let currentAnnotations = new Map(annotations);
 
                 // ── Step 0: Ensure all images have stackGroupId ──────────
-                // Some images may have been indexed before the stackGroupId feature
-                // was added. Compute and persist stackGroupId for any image missing it.
+                reportProgress(0, images.length, 'Assigning prompt IDs...');
                 const missingStackIds: ImageAnnotations[] = [];
                 for (const img of images) {
                     const ann = currentAnnotations.get(img.id);
@@ -3125,6 +3140,15 @@ export const useImageStore = create<ImageState>((set, get) => {
                     else { parent[ry] = rx; rank[rx]++; }
                 };
 
+                // Yield to the event loop every N comparisons to keep the UI
+                // responsive. Without this, the main thread is blocked for minutes
+                // on large libraries (Levenshtein is O(n×m) per pair).
+                const YIELD_EVERY = 150;
+                let cmpCount = 0;
+                const totalPairsEstimate = totalPairs || 1;
+
+                reportProgress(0, totalPairsEstimate, 'Comparing prompt similarity...');
+
                 for (const bucket of buckets) {
                     for (let a = 0; a < bucket.length; a++) {
                         for (let b = a + 1; b < bucket.length; b++) {
@@ -3132,9 +3156,17 @@ export const useImageStore = create<ImageState>((set, get) => {
                             if (find(i) === find(j)) continue;
                             const score = hybridSimilarity(entries[i].prompt, entries[j].prompt);
                             if (score >= THRESHOLD) union(i, j);
+
+                            cmpCount++;
+                            if (cmpCount % YIELD_EVERY === 0) {
+                                reportProgress(cmpCount, totalPairsEstimate, 'Comparing prompt similarity...');
+                                await new Promise(resolve => setTimeout(resolve, 0));
+                            }
                         }
                     }
                 }
+
+                console.log(`[SimilarityGroups] Compared ${cmpCount} prompt pairs`);
 
                 // ── Phase 3: Assign similarityGroupIds ────────────────
                 // Each Union-Find root gets the groupId of its first entry
@@ -3152,6 +3184,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                 }
 
                 // ── Phase 4: Persist ─────────────────────────────────
+                reportProgress(0, 1, 'Saving similarity groups...');
                 const now = Date.now();
                 const updatedAnnotations: ImageAnnotations[] = [];
                 const newAnnotations = new Map(currentAnnotations);
@@ -3186,8 +3219,11 @@ export const useImageStore = create<ImageState>((set, get) => {
                 }
             } catch (error) {
                 console.error('Failed to compute similarity groups:', error);
+                reportProgress(0, 0, 'Similarity grouping failed');
             } finally {
                 (state as any).__similaritySyncInProgress = false;
+                // Clear progress after a short delay so the user sees completion
+                setTimeout(() => get().setSimilarityGroupProgress(null), 1500);
             }
         },
     };
