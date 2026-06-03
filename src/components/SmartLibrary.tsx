@@ -1,84 +1,49 @@
-import React, { useMemo, useEffect, useState, useRef } from 'react';
-import { Layers, Sparkles } from 'lucide-react';
+import React, { useMemo, useState, useRef, useEffect } from 'react';
+import { Layers } from 'lucide-react';
 import { useImageStore } from '../store/useImageStore';
 import { useSettingsStore } from '../store/useSettingsStore';
-
-import { ImageCluster, IndexedImage } from '../types';
+import { useImageStacking } from '../hooks/useImageStacking';
+import { ImageStack, IndexedImage, LibraryStackContext } from '../types';
 import StackCard from './StackCard';
-import StackExpandedView from './StackExpandedView';
+import SimilarityStackExpandedView from './SimilarityStackExpandedView';
 import Footer from './Footer';
 
-const DEFAULT_SIMILARITY_THRESHOLD = 0.88;
+interface StacksProps {}
 
-interface ClusterEntry {
-  cluster: ImageCluster;
-  images: IndexedImage[];
-}
-
-interface SmartLibraryProps {
-}
-
-const SmartLibrary: React.FC<SmartLibraryProps> = () => {
+const Stacks: React.FC<StacksProps> = () => {
   const filteredImages = useImageStore((state) => state.filteredImages);
-  const clusters = useImageStore((state) => state.clusters);
-  const directories = useImageStore((state) => state.directories);
-  const scanSubfolders = useImageStore((state) => state.scanSubfolders);
-  const isClustering = useImageStore((state) => state.isClustering);
-  const clusteringProgress = useImageStore((state) => state.clusteringProgress);
   const isAutoTagging = useImageStore((state) => state.isAutoTagging);
   const autoTaggingProgress = useImageStore((state) => state.autoTaggingProgress);
-  const startClustering = useImageStore((state) => state.startClustering);
-  const cancelClustering = useImageStore((state) => state.cancelClustering);
   const startAutoTagging = useImageStore((state) => state.startAutoTagging);
   const cancelAutoTagging = useImageStore((state) => state.cancelAutoTagging);
-  const setClusterNavigationContext = useImageStore((state) => state.setClusterNavigationContext);
-  // const selectedImages = useImageStore((state) => state.selectedImages); // Unused in this file directly
   const selectionTotalImages = useImageStore((state) => state.selectionTotalImages);
   const selectionDirectoryCount = useImageStore((state) => state.selectionDirectoryCount);
   const enrichmentProgress = useImageStore((state) => state.enrichmentProgress);
-  const restoreSmartLibraryCache = useImageStore((state) => state.restoreSmartLibraryCache);
+  const similarityGroupProgress = useImageStore((state) => state.similarityGroupProgress);
+  const directories = useImageStore((state) => state.directories);
 
   const imageSize = useSettingsStore((state) => state.viewZoomLevels.smart);
   const { viewMode, toggleViewMode } = useSettingsStore();
-  // const { handleDeleteSelectedImages, clearSelection } = useImageSelection(); // Unused
   const safeFilteredImages = Array.isArray(filteredImages) ? filteredImages : [];
 
-  const [expandedClusterId, setExpandedClusterId] = useState<string | null>(null);
-  const [sortBy, setSortBy] = useState<'count' | 'similarity'>('count');
+  // Use the same stacking hook as the library grid — this groups images by
+  // similarityGroupId (or stackGroupId fallback) into ImageStacks with subGroups.
+  const { stackedItems } = useImageStacking(safeFilteredImages, true);
 
+  // Extract only the ImageStack items (skip singletons).
+  // Sorting follows the global sort order from useImageStacking (same as the library grid).
+  const stacks = useMemo(() => {
+    return stackedItems.filter((item): item is ImageStack =>
+      'coverImage' in item
+    );
+  }, [stackedItems]);
+
+  // ── Drill-down state ───────────────────────────────────────────────
+  const [expandedStackId, setExpandedStackId] = useState<string | null>(null);
   const scrollPositionRef = useRef<number>(0);
   const gridScrollPositionRef = useRef<number>(0);
   const sectionRef = useRef<HTMLElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
-
-  const imageMap = useMemo(() => {
-    return new Map(safeFilteredImages.map((image) => [image.id, image]));
-  }, [safeFilteredImages]);
-
-  const clusterEntries = useMemo(() => {
-    return clusters
-      .map((cluster) => ({
-        cluster,
-        images: cluster.imageIds
-          .map((id) => imageMap.get(id))
-          .filter((image): image is IndexedImage => Boolean(image)),
-      }))
-      .filter((entry) => entry.images.length >= 3); // Minimum 3 images per cluster
-  }, [clusters, imageMap]);
-
-  const sortedEntries = useMemo(() => {
-    return [...clusterEntries].sort((a, b) => {
-      if (sortBy === 'similarity') {
-        return b.cluster.similarityThreshold - a.cluster.similarityThreshold;
-      } else {
-        const imageCountDelta = b.images.length - a.images.length;
-        if (imageCountDelta !== 0) {
-          return imageCountDelta;
-        }
-        return b.cluster.size - a.cluster.size;
-      }
-    });
-  }, [clusterEntries, sortBy]);
 
   const getScrollContainer = () => {
     if (!sectionRef.current) return null;
@@ -93,19 +58,19 @@ const SmartLibrary: React.FC<SmartLibraryProps> = () => {
     return null;
   };
 
-  const handleOpenStack = (clusterId: string) => {
+  const handleOpenStack = (stackId: string) => {
     const scrollContainer = getScrollContainer();
-    if (scrollContainer) {
-      scrollPositionRef.current = scrollContainer.scrollTop;
-    }
-    if (gridRef.current) {
-      gridScrollPositionRef.current = gridRef.current.scrollTop;
-    }
-    setExpandedClusterId(clusterId);
+    if (scrollContainer) scrollPositionRef.current = scrollContainer.scrollTop;
+    if (gridRef.current) gridScrollPositionRef.current = gridRef.current.scrollTop;
+    setExpandedStackId(stackId);
+  };
+
+  const handleCloseStack = () => {
+    setExpandedStackId(null);
   };
 
   useEffect(() => {
-    if (!expandedClusterId) {
+    if (!expandedStackId) {
       const timer = setTimeout(() => {
         const scrollContainer = getScrollContainer();
         if (scrollContainer && scrollPositionRef.current > 0) {
@@ -117,93 +82,102 @@ const SmartLibrary: React.FC<SmartLibraryProps> = () => {
       }, 30);
       return () => clearTimeout(timer);
     }
-  }, [expandedClusterId]);
+  }, [expandedStackId]);
 
+  // Clear expanded state if the stack is removed
   useEffect(() => {
-    if (expandedClusterId && !clusterEntries.some((entry) => entry.cluster.id === expandedClusterId)) {
-      setExpandedClusterId(null);
+    if (expandedStackId && !stacks.some(s => s.id === expandedStackId)) {
+      setExpandedStackId(null);
     }
-  }, [expandedClusterId, clusterEntries]);
+  }, [expandedStackId, stacks]);
 
-  const activeCluster = expandedClusterId
-    ? clusterEntries.find((entry) => entry.cluster.id === expandedClusterId) ?? null
+  const activeStack = expandedStackId
+    ? stacks.find(s => s.id === expandedStackId) ?? null
     : null;
 
-  const activeClusterImages = useMemo(() => {
-    if (!activeCluster) {
-      return [];
-    }
-    return [...activeCluster.images].sort((a, b) => (a.lastModified || 0) - (b.lastModified || 0));
-  }, [activeCluster]);
+  // Build drill-down props from the active stack
+  const drillDownSubGroups = useMemo(() => {
+    if (!activeStack?.subGroups) return [];
+    return activeStack.subGroups.map(sg => ({
+      promptHash: sg.promptHash,
+      prompt: sg.prompt,
+      imageIds: sg.imageIds,
+    }));
+  }, [activeStack]);
 
   const primaryPath = directories[0]?.path ?? '';
   const hasDirectories = directories.length > 0;
 
-  // Cache restoration is now handled globally in App.tsx
-  // to ensure auto-tags and clusters are available before opening Smart Library 
-
-  const handleGenerateClusters = () => {
-    if (!primaryPath) return;
-    startClustering(primaryPath, scanSubfolders, DEFAULT_SIMILARITY_THRESHOLD);
-  };
-
   const handleGenerateAutoTags = () => {
     if (!primaryPath) return;
-    startAutoTagging(primaryPath, scanSubfolders);
+    startAutoTagging(primaryPath, false);
+  };
+
+  const handleImageClick = (image: IndexedImage, event: React.MouseEvent) => {
+    // Delegate to the global image selection handler — this is handled by
+    // the parent App component. Stacks drill-down view receives
+    // onImageClick from App.tsx context.
+    // For now, we use the store's setSelectedImage directly.
+    const { setSelectedImage, setFocusedImageIndex, filteredImages: storeFiltered } = useImageStore.getState();
+    const clickedIndex = storeFiltered.findIndex(img => img.id === image.id);
+    if (clickedIndex !== -1) setFocusedImageIndex(clickedIndex);
+    setSelectedImage(image);
   };
 
   return (
-    <section ref={sectionRef} className="flex flex-col h-full min-h-0 pt-3 relative">
-      {activeCluster && (
-        <div className="absolute inset-0 bg-gray-900 z-10 px-3 flex flex-col min-h-0">
-          <StackExpandedView
-            cluster={activeCluster.cluster}
-            images={activeClusterImages}
-            allImages={activeClusterImages}
-            onBack={() => {
-              setClusterNavigationContext(null);
-              setExpandedClusterId(null);
-            }}
-            viewMode={viewMode}
+    <section ref={sectionRef} className="flex flex-col h-full min-h-0 pt-3">
+      {/* Drill-down view — replaces the grid content, Footer stays below */}
+      {activeStack ? (
+        <div className="flex-1 min-h-0 flex flex-col">
+          <SimilarityStackExpandedView
+            images={activeStack.images}
+            subGroups={drillDownSubGroups}
+            onImageClick={handleImageClick}
+            selectedImages={new Set()}
+            onBack={handleCloseStack}
+            imageSize={imageSize}
           />
         </div>
-      )}
-
-      {!activeCluster && sortedEntries.length === 0 && (
+      ) : stacks.length === 0 ? (
+        /* Empty state */
         <div className="flex-1 min-h-0 overflow-y-auto">
           <div className="h-full flex flex-col items-center justify-center text-center text-gray-400">
             <div className="w-14 h-14 rounded-full bg-gray-800/60 flex items-center justify-center mb-3">
               <Layers className="w-6 h-6" />
             </div>
-            <h3 className="text-sm font-semibold text-gray-200">No clusters yet</h3>
+            <h3 className="text-sm font-semibold text-gray-200">No stacks yet</h3>
             <p className="text-xs max-w-md mt-2">
-              Generate clusters to group similar prompts into visual stacks. This is fully virtual and does not move files.
+              {safeFilteredImages.length === 0
+                ? 'Add a folder with images to see stacks grouped by prompt similarity.'
+                : similarityGroupProgress
+                  ? 'Similarity groups are being computed — stacks will appear shortly.'
+                  : 'Stacks are created automatically from your images. Each stack groups similar prompts with sub-group labels.'}
             </p>
           </div>
         </div>
-      )}
-
-      {sortedEntries.length > 0 && (
-        <div 
+      ) : (
+        /* Stack grid */
+        <div
           ref={gridRef}
           className="flex-1 min-h-0 overflow-y-auto"
           id="smart-library-grid-container"
         >
+          <div className="flex items-center gap-2 px-3 mb-3">
+            <span className="text-xs text-gray-500">{stacks.length} stacks</span>
+          </div>
+
           <div className="min-h-0 pl-3 pr-2">
-            <div 
+            <div
               className="grid gap-4"
               style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${Math.min(350, Math.max(250, imageSize))}px, 1fr))` }}
             >
-              {sortedEntries.map((entry) => {
-                return (
-                  <StackCard
-                    key={entry.cluster.id}
-                    cluster={entry.cluster}
-                    images={entry.images}
-                    onOpen={() => handleOpenStack(entry.cluster.id)}
-                  />
-                );
-              })}
+              {stacks.map((stack) => (
+                <StackCard
+                  key={stack.id}
+                  stack={stack}
+                  onOpen={() => handleOpenStack(stack.id)}
+                />
+              ))}
             </div>
           </div>
         </div>
@@ -216,13 +190,10 @@ const SmartLibrary: React.FC<SmartLibraryProps> = () => {
         totalCount={selectionTotalImages}
         enrichmentProgress={enrichmentProgress}
         autoTaggingProgress={autoTaggingProgress}
-        clusteringProgress={clusteringProgress}
+        similarityGroupProgress={similarityGroupProgress}
         onCancelAutoTag={cancelAutoTagging}
-        onCancelClustering={cancelClustering}
-        showSmartActions={true}
-        onCluster={handleGenerateClusters}
+        showAutoTag={true}
         onAutoTag={handleGenerateAutoTags}
-        isClustering={isClustering}
         isAutoTagging={isAutoTagging}
         hasDirectories={hasDirectories}
       />
@@ -230,4 +201,4 @@ const SmartLibrary: React.FC<SmartLibraryProps> = () => {
   );
 };
 
-export default SmartLibrary;
+export default Stacks;

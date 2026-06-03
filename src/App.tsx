@@ -22,7 +22,7 @@ import DirectoryList from './components/DirectoryList';
 import ImagePreviewSidebar from './components/ImagePreviewSidebar';
 import CommandPalette from './components/CommandPalette';
 import HotkeyHelp from './components/HotkeyHelp';
-import SmartLibrary from './components/SmartLibrary';
+import Stacks from './components/SmartLibrary';
 import { ModelView } from './components/ModelView';
 import GridToolbar from './components/GridToolbar';
 import TopMenuBar from './components/TopMenuBar';
@@ -957,7 +957,7 @@ export default function App() {
               ) : (
                 <div className="h-full">
                   {activeView === 'smart' ? (
-                    <SmartLibrary />
+                    <Stacks />
                   ) : activeView === 'model' ? (
                     <ModelView 
                       onModelSelect={(modelName) => {

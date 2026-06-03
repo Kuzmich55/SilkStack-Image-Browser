@@ -23,11 +23,11 @@ export const getItemAspectRatio = (item: IndexedImage | ImageStack): number => {
 
   // Fallback if metadata is missing or invalid
   const meta = image.metadata as any;
-  if (meta.width && meta.height && meta.height > 0) {
+  if (meta?.width && meta?.height && meta.height > 0) {
     return meta.width / meta.height;
   }
 
-  if (meta.normalizedMetadata?.width && meta.normalizedMetadata?.height && meta.normalizedMetadata.height > 0) {
+  if (meta?.normalizedMetadata?.width && meta.normalizedMetadata?.height && meta.normalizedMetadata.height > 0) {
     return meta.normalizedMetadata.width / meta.normalizedMetadata.height;
   }
 

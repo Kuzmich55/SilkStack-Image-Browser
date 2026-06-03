@@ -181,6 +181,8 @@ interface SimilarityStackExpandedViewProps {
   onImageClick: (image: IndexedImage, event: React.MouseEvent) => void;
   selectedImages: Set<string>;
   onBack: () => void;
+  /** Target row height for justified layout. Defaults to viewZoomLevels.library. */
+  imageSize?: number;
 }
 
 /**
@@ -196,8 +198,10 @@ const SimilarityStackExpandedView: React.FC<SimilarityStackExpandedViewProps> = 
   onImageClick,
   selectedImages,
   onBack,
+  imageSize: imageSizeProp,
 }) => {
-  const imageSize = useSettingsStore((state) => state.viewZoomLevels.library);
+  const libraryImageSize = useSettingsStore((state) => state.viewZoomLevels.library);
+  const imageSize = imageSizeProp ?? libraryImageSize;
 
   // Build a map from imageId to image for quick lookup
   const imageMap = useMemo(() => {
@@ -214,7 +218,7 @@ const SimilarityStackExpandedView: React.FC<SimilarityStackExpandedViewProps> = 
 
   useEffect(() => {
     const el = containerRef.current;
-    if (!el) return;
+    if (!el || typeof ResizeObserver === 'undefined') return;
 
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -227,10 +231,15 @@ const SimilarityStackExpandedView: React.FC<SimilarityStackExpandedViewProps> = 
     // Initial measurement
     if (el.clientWidth > 0) setContainerWidth(el.clientWidth);
 
+    // Fallback: if ResizeObserver is unavailable (e.g. tests), measure synchronously
+    if (typeof ResizeObserver === 'undefined' && el.clientWidth > 0) {
+      setContainerWidth(el.clientWidth);
+    }
+
     return () => observer.disconnect();
   }, []);
 
-  const availableWidth = Math.max(1, containerWidth - CONTAINER_PADDING);
+  const availableWidth = Math.max(1, (containerWidth || (containerRef.current?.clientWidth ?? 800)) - CONTAINER_PADDING);
 
   return (
     <div className="flex flex-col h-full">

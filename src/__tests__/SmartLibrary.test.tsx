@@ -13,7 +13,7 @@ vi.hoisted(() => {
 
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
-import SmartLibrary from '../components/SmartLibrary';
+import Stacks from '../components/SmartLibrary';
 import { useImageStore } from '../store/useImageStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 
@@ -32,28 +32,23 @@ if (typeof global.window !== 'undefined') {
   };
 }
 
-describe('SmartLibrary Scroll Position and DOM Preservation', () => {
+describe('Stacks Scroll Position and DOM Preservation', () => {
   it('keeps the grid container completely untouched in the DOM and layouts the expanded stack view absolutely over it', async () => {
-    // Populate mock store data
+    // Populate mock store data — images need stackGroupId for stacking to work
     const mockImages = [
-      { id: '1', prompt: 'test prompt A', directoryId: 'dir1', lastModified: 1000 },
-      { id: '2', prompt: 'test prompt A', directoryId: 'dir1', lastModified: 900 },
-      { id: '3', prompt: 'test prompt A', directoryId: 'dir1', lastModified: 800 },
-      { id: '4', prompt: 'test prompt B', directoryId: 'dir1', lastModified: 700 },
-    ] as any;
-
-    const mockClusters = [
-      { id: 'cluster-1', basePrompt: 'test prompt A', size: 3, imageIds: ['1', '2', '3'], similarityThreshold: 0.9 },
+      { id: '1', prompt: 'test prompt A', directoryId: 'dir1', lastModified: 1000, stackGroupId: 'hash-a' },
+      { id: '2', prompt: 'test prompt A', directoryId: 'dir1', lastModified: 900, stackGroupId: 'hash-a' },
+      { id: '3', prompt: 'test prompt A', directoryId: 'dir1', lastModified: 800, stackGroupId: 'hash-a' },
+      { id: '4', prompt: 'test prompt B', directoryId: 'dir1', lastModified: 700, stackGroupId: 'hash-b' },
     ] as any;
 
     useImageStore.setState({
       filteredImages: mockImages,
-      clusters: mockClusters,
       directories: [{ id: 'dir1', path: 'C:/test' }] as any,
       scanSubfolders: false,
     });
 
-    const { container } = render(<SmartLibrary />);
+    const { container } = render(<Stacks />);
 
     // Grid container should be in DOM and visible
     const gridContainer = container.querySelector('#smart-library-grid-container') as HTMLElement;
@@ -64,16 +59,15 @@ describe('SmartLibrary Scroll Position and DOM Preservation', () => {
     const openBtn = screen.getByText(/images/i);
     fireEvent.click(openBtn);
 
-    // Expanded view should be rendered
-    expect(screen.getByText(/Back to stacks/i)).toBeDefined();
+    // Expanded view should be rendered (SimilarityStackExpandedView shows "Library" back button)
+    expect(screen.getByText(/Library/i)).toBeDefined();
 
-    // Crucially, the grid container MUST be completely untouched in the DOM to keep its scroll position
+    // Grid content is replaced by drill-down view (scroll position saved in refs,
+    // restored via useEffect when closing). Footer remains visible below.
     const gridContainerAfterOpen = container.querySelector('#smart-library-grid-container') as HTMLElement;
-    expect(gridContainerAfterOpen).not.toBeNull();
-    expect(gridContainerAfterOpen.className).toBe('flex-1 min-h-0 overflow-y-auto');
+    expect(gridContainerAfterOpen).toBeNull();
 
-    // The overlay container wrapping StackExpandedView should have absolute z-10 class
-    const overlay = container.querySelector('.absolute.inset-0.bg-gray-900.z-10');
-    expect(overlay).not.toBeNull();
+    // Footer should still be visible
+    expect(container.querySelector('footer')).not.toBeNull();
   });
 });

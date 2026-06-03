@@ -1,20 +1,20 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Layers, Lock } from 'lucide-react';
-import { ImageCluster, IndexedImage } from '../types';
+import { Layers } from 'lucide-react';
+import { ImageStack, IndexedImage } from '../types';
 import { useThumbnail } from '../hooks/useThumbnail';
 
 interface StackCardProps {
-  cluster: ImageCluster;
-  images: IndexedImage[];
+  stack: ImageStack;
   onOpen: () => void;
 }
 
-const StackCard: React.FC<StackCardProps> = ({ cluster, images, onOpen }) => {
+const StackCard: React.FC<StackCardProps> = ({ stack, onOpen }) => {
   const [previewIndex, setPreviewIndex] = useState(0);
   const cardRef = useRef<HTMLButtonElement | null>(null);
   const rafRef = useRef<number | null>(null);
   const pendingIndexRef = useRef(0);
 
+  const images = stack.images;
   const previewImage = images[previewIndex] ?? images[0] ?? null;
   useThumbnail(previewImage);
 
@@ -50,21 +50,19 @@ const StackCard: React.FC<StackCardProps> = ({ cluster, images, onOpen }) => {
     updatePreviewIndex(0);
   };
 
-  const promptLabel = cluster.basePrompt || previewImage?.prompt || 'Untitled stack';
+  const promptLabel = stack.basePrompt || previewImage?.prompt || 'Untitled stack';
   const coverUrl = previewImage?.thumbnailUrl || '';
-  const displayCount = images.length;
-  const totalCount = cluster.size;
-  const countLabel = displayCount === totalCount ? `${displayCount}` : `${displayCount}/${totalCount}`;
-  const detailCountLabel = displayCount === totalCount ? `${displayCount} images` : `${displayCount}/${totalCount} images`;
-
-  const handleClick = () => {
-    onOpen();
-  };
+  const displayCount = stack.count;
+  const subGroupCount = stack.subGroups?.length || 0;
+  const countLabel = `${displayCount}`;
+  const detailLabel = subGroupCount > 1
+    ? `${displayCount} images · ${subGroupCount} prompt variations`
+    : `${displayCount} images`;
 
   return (
     <button
       ref={cardRef}
-      onClick={handleClick}
+      onClick={onOpen}
       onPointerMove={handlePointerMove}
       onPointerLeave={handlePointerLeave}
       className="group text-left bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-md transition-all hover:shadow-xl hover:shadow-blue-500/10 dark:bg-gray-900/60 dark:border-gray-800 dark:shadow-lg dark:hover:shadow-blue-500/20"
@@ -84,11 +82,11 @@ const StackCard: React.FC<StackCardProps> = ({ cluster, images, onOpen }) => {
           </div>
         )}
 
-
         <div className="absolute top-3 left-3 flex items-center gap-1.5 rounded-full bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-gray-100 shadow-sm backdrop-blur-sm dark:bg-black/60 dark:shadow-none">
           <Layers className="w-3.5 h-3.5" />
           {countLabel}
         </div>
+
         {images.length > 1 && (
           <div className="absolute bottom-3 left-3 right-3 h-1 rounded-full bg-black/20 overflow-hidden dark:bg-black/40">
             <div
@@ -102,9 +100,7 @@ const StackCard: React.FC<StackCardProps> = ({ cluster, images, onOpen }) => {
       </div>
       <div className="p-3">
         <p className="text-sm font-semibold text-gray-100 truncate">{promptLabel}</p>
-        <p className="text-xs text-gray-300 mt-1">
-          {detailCountLabel} | similarity {Math.round(cluster.similarityThreshold * 100)}%
-        </p>
+        <p className="text-xs text-gray-300 mt-1">{detailLabel}</p>
       </div>
     </button>
   );

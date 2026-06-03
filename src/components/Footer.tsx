@@ -189,7 +189,7 @@ const Footer: React.FC<FooterProps> = ({
           </button>
         )}
 
-        {/* Smart Library Actions */}
+        {/* Stacks Actions */}
         {showSmartActions && (
           <div className="flex items-center gap-2 mr-2">
             <button

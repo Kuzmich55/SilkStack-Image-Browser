@@ -16,6 +16,17 @@ import { useSettingsStore } from './useSettingsStore';
 const RECENT_TAGS_STORAGE_KEY = 'image-metahub-recent-tags';
 const MAX_RECENT_TAGS = 12;
 
+// Bump this version whenever the similarity algorithm or threshold changes
+// to force re-computation of similarityGroupId for all images.
+const SIMILARITY_GROUP_VERSION = 2;
+const SIMILARITY_VERSION_KEY = 'similarityGroupVersion';
+
+// Module-level concurrency guards. Must be module-scoped (not on state) because
+// Zustand's get() returns a new snapshot after every set(), making state-attached
+// flags invisible to subsequent calls.
+let __syncInProgress = false;
+let __similaritySyncInProgress = false;
+
 const loadRecentTags = (): string[] => {
     if (typeof window === 'undefined') {
         return [];
@@ -2165,20 +2176,55 @@ export const useImageStore = create<ImageState>((set, get) => {
                 return { ...newState, ...filterAndSort(newState) };
             });
 
-            // After loading annotations, compute similarity groups.
-            // Runs asynchronously — UI shows exact-match stacks immediately.
-            const state = get();
-            const annValues = Array.from(state.annotations.values());
-            const withStackId = annValues.filter(a => !!a.stackGroupId).length;
-            const withSimId = annValues.filter(a => !!a.similarityGroupId).length;
-            console.log(`[SimilarityGroups] Annotations loaded: ${annValues.length} total, ${withStackId} with stackGroupId, ${withSimId} with similarityGroupId`);
+            // After loading annotations, schedule similarity group computation.
+            // Wrapped in try/catch — any error here must not prevent images from loading.
+            try {
+                const state = get();
+                const annValues = Array.from(state.annotations.values());
+                const withStackId = annValues.filter(a => !!a.stackGroupId).length;
+                const withSimId = annValues.filter(a => !!a.similarityGroupId).length;
+                console.log(`[SimilarityGroups] Annotations loaded: ${annValues.length} total, ${withStackId} with stackGroupId, ${withSimId} with similarityGroupId`);
 
-            if (withStackId > 1) {
-                console.log('[SimilarityGroups] Scheduling similarity computation (deferred 300ms)...');
-                // Defer so the UI renders first, then compute in background with chunked yielding
-                setTimeout(() => get().computeSimilarityGroups(), 300);
-            } else {
-                console.log('[SimilarityGroups] Skipping — need at least 2 unique prompts to merge');
+                // Check if similarity algorithm version changed — if so, clear old
+                // similarityGroupId values and force re-computation with new threshold.
+                const storedVersion = localStorage.getItem(SIMILARITY_VERSION_KEY);
+                if (storedVersion !== String(SIMILARITY_GROUP_VERSION) && withSimId > 0) {
+                    console.log(`[SimilarityGroups] Version changed (${storedVersion} → ${SIMILARITY_GROUP_VERSION}), resetting similarity groups...`);
+                    const { bulkSaveAnnotations } = await import('../services/imageAnnotationsStorage');
+                    const resetAnnotations: ImageAnnotations[] = [];
+                    const resetMap = new Map(state.annotations);
+                    for (const [id, ann] of resetMap) {
+                        if (ann.similarityGroupId) {
+                            const updated = { ...ann, similarityGroupId: undefined, updatedAt: Date.now() };
+                            resetAnnotations.push(updated);
+                            resetMap.set(id, updated);
+                        }
+                    }
+                    if (resetAnnotations.length > 0) {
+                        await bulkSaveAnnotations(resetAnnotations);
+                        const imagesWithAnnotations = applyAnnotationsToImages(state.images, resetMap);
+                        const filteredResult = filterAndSort({ ...state, images: imagesWithAnnotations, annotations: resetMap });
+                        const availableFilters = recalculateAvailableFilters(filteredResult.filteredImages);
+                        set({ ...filteredResult, ...availableFilters, images: imagesWithAnnotations, annotations: resetMap });
+                        console.log(`[SimilarityGroups] Reset ${resetAnnotations.length} similarityGroupId values`);
+                    }
+                }
+                localStorage.setItem(SIMILARITY_VERSION_KEY, String(SIMILARITY_GROUP_VERSION));
+
+                const updatedState = get();
+                const needsComputation = Array.from(updatedState.annotations.values()).some(
+                    a => a.stackGroupId && !a.similarityGroupId
+                );
+                if (needsComputation) {
+                    console.log('[SimilarityGroups] Scheduling similarity computation (deferred 300ms)...');
+                    setTimeout(() => get().computeSimilarityGroups(), 300);
+                } else {
+                    console.log('[SimilarityGroups] All groups already computed — skipping');
+                }
+            } catch (err) {
+                console.error('[SimilarityGroups] Post-load processing failed (images still loaded):', err);
+                // Ensure version is still written so we don't retry the failing migration
+                try { localStorage.setItem(SIMILARITY_VERSION_KEY, String(SIMILARITY_GROUP_VERSION)); } catch {}
             }
         },
 
@@ -2859,9 +2905,9 @@ export const useImageStore = create<ImageState>((set, get) => {
             const state = get();
             const { images, annotations } = state;
 
-            // Prevent concurrent runs
-            if ((state as any).__syncInProgress) return;
-            (state as any).__syncInProgress = true;
+            // Prevent concurrent runs (module-level guard — survives state updates)
+            if (__syncInProgress) return;
+            __syncInProgress = true;
 
             try {
                 const { normalizePrompt, generatePromptHash } = await import('../utils/similarityMetrics');
@@ -2931,7 +2977,7 @@ export const useImageStore = create<ImageState>((set, get) => {
             } catch (error) {
                 console.error('Failed to sync new images to stacks:', error);
             } finally {
-                (state as any).__syncInProgress = false;
+                __syncInProgress = false;
             }
         },
 
@@ -2992,9 +3038,9 @@ export const useImageStore = create<ImageState>((set, get) => {
             const state = get();
             const { images, annotations } = state;
 
-            // Prevent concurrent runs
-            if ((state as any).__similaritySyncInProgress) return;
-            (state as any).__similaritySyncInProgress = true;
+            // Prevent concurrent runs (module-level guard — survives state updates)
+            if (__similaritySyncInProgress) return;
+            __similaritySyncInProgress = true;
 
             const reportProgress = (current: number, total: number, message: string) => {
                 get().setSimilarityGroupProgress({ current, total, message });
@@ -3121,11 +3167,11 @@ export const useImageStore = create<ImageState>((set, get) => {
                 console.log(`[SimilarityGroups] ${buckets.length} buckets, ${totalPairs} pairwise comparisons`);
 
                 // ── Phase 2: Union-Find similarity clustering ─────────
-                // Use a much lower threshold (0.40) than Smart Library (0.88).
-                // Library stacks show sub-group labels for each distinct prompt,
-                // so false positives are visible and self-correcting. This catches
-                // variations like "cat sitting" vs "cat sleeping" (~0.40 hybrid).
-                const THRESHOLD = 0.40;
+                // 0.85 threshold — same as Smart Library default. Only prompts
+                // with very high structural similarity are merged. This keeps
+                // similarity groups tight while still catching near-identical
+                // prompts that differ only in metadata or minor phrasing.
+                const THRESHOLD = 0.85;
                 const parent = Array.from({ length: entries.length }, (_, i) => i);
                 const rank = new Array(entries.length).fill(0);
                 const find = (x: number): number => {
@@ -3221,7 +3267,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                 console.error('Failed to compute similarity groups:', error);
                 reportProgress(0, 0, 'Similarity grouping failed');
             } finally {
-                (state as any).__similaritySyncInProgress = false;
+                __similaritySyncInProgress = false;
                 // Clear progress after a short delay so the user sees completion
                 setTimeout(() => get().setSimilarityGroupProgress(null), 1500);
             }
