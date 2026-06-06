@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { IndexedImage, Directory, ThumbnailStatus, ImageAnnotations, TagInfo, ImageCluster, AutoTag, LibraryStackContext } from '../types';
+import { IndexedImage, Directory, ThumbnailStatus, ImageAnnotations, TagInfo, AutoTag, LibraryStackContext } from '../types';
 import { loadSelectedFolders, saveSelectedFolders, loadExcludedFolders, saveExcludedFolders } from '../services/folderSelectionStorage';
 import { loadFolderPreferences, saveFolderPreference, deleteFolderPreference, FolderPreference } from '../services/folderPreferencesStorage';
 import {
@@ -228,11 +228,12 @@ interface ImageState {
   refreshingDirectories: Set<string>;
 
   // Smart Clustering State (Phase 2)
-  clusters: ImageCluster[];
+  // Clustering state retained for backward compatibility (no longer used)
+  clusters: any[];
   clusteringProgress: { current: number; total: number; message: string } | null;
   clusteringWorker: Worker | null;
   isClustering: boolean;
-  clusterNavigationContext: IndexedImage[] | null; // Images from currently opened cluster for modal navigation
+  clusterNavigationContext: IndexedImage[] | null;
 
   // Similarity Grouping State
   similarityGroupProgress: { current: number; total: number; message: string } | null;
@@ -314,7 +315,7 @@ interface ImageState {
   // Clustering Actions (Phase 2)
   startClustering: (directoryPath: string, scanSubfolders: boolean, threshold: number) => Promise<void>;
   cancelClustering: () => void;
-  setClusters: (clusters: ImageCluster[]) => void;
+  setClusters: (clusters: any[]) => void;
   setClusteringProgress: (progress: { current: number; total: number; message: string } | null) => void;
   setSimilarityGroupProgress: (progress: { current: number; total: number; message: string } | null) => void;
   handleClusterImageDeletion: (deletedImageIds: string[]) => void;
@@ -1814,92 +1815,13 @@ export const useImageStore = create<ImageState>((set, get) => {
         setFocusedImageIndex: (index) => set({ focusedImageIndex: index }),
         setFullscreenMode: (isFullscreen) => set({ isFullscreenMode: isFullscreen }),
 
-        // Clustering Actions (Phase 2)
-        startClustering: async (directoryPath: string, scanSubfolders: boolean, threshold: number) => {
-            const { images, clusteringWorker: existingWorker } = get();
-
-            // Cancel existing worker if running
-            if (existingWorker) {
-                existingWorker.terminate();
-            }
-
-            const imagesWithPrompts = images.filter(img => img.prompt && img.prompt.trim());
-            const limitedImages = imagesWithPrompts;
-
-            // Create new worker
-            const worker = new Worker(
-                new URL('../services/workers/clusteringWorker.ts', import.meta.url),
-                { type: 'module' }
-            );
-
-            set({ clusteringWorker: worker, isClustering: true, clusteringProgress: { current: 0, total: limitedImages.length, message: 'Initializing...' } });
-
-            // Handle worker messages
-            worker.onmessage = (e: MessageEvent) => {
-                const { type, payload } = e.data;
-
-                switch (type) {
-                    case 'progress':
-                        set({ clusteringProgress: payload });
-                        break;
-
-                    case 'complete':
-                        set({
-                            clusters: payload.clusters,
-                            clusteringProgress: null,
-                            isClustering: false,
-                        });
-                        worker.terminate();
-                        set({ clusteringWorker: null });
-                        console.log(`Clustering complete: ${payload.clusters.length} clusters created`);
-
-                        // Save cluster cache to disk for persistence across restarts
-                        import('../services/clusterCacheManager')
-                            .then(({ saveClusterCache }) => saveClusterCache(directoryPath, scanSubfolders, payload.clusters, threshold))
-                            .catch(error => console.warn('Failed to save cluster cache:', error));
-                        break;
-
-                    case 'error':
-                        console.error('Clustering error:', payload.error);
-                        set({
-                            clusteringProgress: null,
-                            isClustering: false,
-                            error: `Clustering failed: ${payload.error}`,
-                        });
-                        worker.terminate();
-                        set({ clusteringWorker: null });
-                        break;
-                }
-            };
-
-            // Prepare lightweight data for worker (90% less data)
-            const lightweightImages = limitedImages.map(img => ({
-                id: img.id,
-                prompt: img.prompt!,
-                lastModified: img.lastModified,
-            }));
-
-            // Start clustering
-            worker.postMessage({
-                type: 'start',
-                payload: {
-                    images: lightweightImages,
-                    threshold,
-                },
-            });
+        // Clustering removed — these are no-ops retained for interface compatibility
+        startClustering: async (_directoryPath: string, _scanSubfolders: boolean, _threshold: number) => {
+            console.warn('Clustering has been removed. Use library similarity stacks instead.');
         },
 
         cancelClustering: () => {
-            const { clusteringWorker } = get();
-            if (clusteringWorker) {
-                clusteringWorker.postMessage({ type: 'cancel' });
-                clusteringWorker.terminate();
-                set({
-                    clusteringWorker: null,
-                    clusteringProgress: null,
-                    isClustering: false,
-                });
-            }
+            // No-op: clustering removed
         },
 
         setClusters: (clusters) => set({ clusters }),
@@ -1914,11 +1836,7 @@ export const useImageStore = create<ImageState>((set, get) => {
             const { clusters } = get();
             if (clusters.length === 0) return;
 
-            // Import removeImagesFromClusters dynamically to avoid circular deps
-            import('../services/clusteringEngine').then(({ removeImagesFromClusters }) => {
-                const updatedClusters = removeImagesFromClusters(deletedImageIds, clusters);
-                set({ clusters: updatedClusters });
-            });
+            // clusteringEngine removed — handleClusterImageDeletion is a no-op
         },
 
         // Auto-Tagging Actions (Phase 3)
@@ -2034,11 +1952,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                         console.log(`Auto-tagging complete: ${tagMap.size} images tagged`);
 
                         if (payload.autoTags) {
-                            import('../services/clusterCacheManager')
-                                .then(({ saveAutoTagCache }) => saveAutoTagCache(directoryPath, scanSubfolders, payload.autoTags))
-                                .catch(error => {
-                                    console.warn('Failed to save auto-tag cache:', error);
-                                });
+                            // clusterCacheManager removed — auto-tag cache save disabled
                         }
                         break;
                     }
@@ -2083,75 +1997,11 @@ export const useImageStore = create<ImageState>((set, get) => {
 
         setAutoTaggingProgress: (progress) => set({ autoTaggingProgress: progress }),
 
-        restoreSmartLibraryCache: async (directoryPath, scanSubfolders) => {
-            try {
-                const { loadClusterCache, loadAutoTagCache } =
-                    await import('../services/clusterCacheManager');
-
-                // Restore clusters (only if none exist yet)
-                const { clusters } = get();
-                if (clusters.length === 0) {
-                    const clusterCache = await loadClusterCache(directoryPath, scanSubfolders);
-                    if (clusterCache?.clusters?.length) {
-                        set({ clusters: clusterCache.clusters });
-                        console.log(`Restored ${clusterCache.clusters.length} clusters from cache`);
-                    }
-                }
-
-                // Restore auto-tags into autoTags field
-                const autoTagCache = await loadAutoTagCache(directoryPath, scanSubfolders);
-                if (autoTagCache?.autoTags && Object.keys(autoTagCache.autoTags).length > 0) {
-                    const tagMap = new Map<string, string[]>();
-                    for (const [id, tags] of Object.entries(autoTagCache.autoTags)) {
-                        const normalizedTags = [...new Set((tags as any[] || []).map((t: any) => t.tag).filter(Boolean))];
-                        tagMap.set(id, normalizedTags);
-                    }
-
-                    const cacheAnnotations: ImageAnnotations[] = [];
-                    const currentAnnotations = get().annotations;
-                    for (const [imageId, newTags] of tagMap) {
-                        const current = currentAnnotations.get(imageId);
-                        const existingAutoTags = current?.autoTags ?? [];
-                        const tagsToAdd = newTags.filter(t => !existingAutoTags.includes(t));
-                        if (tagsToAdd.length > 0) {
-                            cacheAnnotations.push({
-                                imageId,
-                                isFavorite: current?.isFavorite ?? false,
-                                tags: current?.tags ?? [],
-                                autoTags: [...existingAutoTags, ...tagsToAdd],
-                                isAutoTagged: true,
-                                metadataTags: current?.metadataTags ?? [],
-                                addedAt: current?.addedAt ?? autoTagCache.lastGenerated ?? Date.now(),
-                                updatedAt: Date.now(),
-                            });
-                        }
-                    }
-
-                    if (cacheAnnotations.length > 0) {
-                        const { bulkSaveAnnotations } = await import('../services/imageAnnotationsStorage');
-                        await bulkSaveAnnotations(cacheAnnotations);
-
-                        set(state => {
-                            const newAnnotations = new Map(state.annotations);
-                            for (const annotation of cacheAnnotations) {
-                                newAnnotations.set(annotation.imageId, annotation);
-                            }
-                            const newImages = state.images.map(img => {
-                                const annotation = newAnnotations.get(img.id);
-                                if (annotation) {
-                                    const mergedTags = mergeAnnotationTags(annotation);
-                                    return { ...img, tags: mergedTags, autoTags: annotation.autoTags, metadataTags: annotation.metadataTags };
-                                }
-                                return img;
-                            });
-                            return _updateState({ ...state, annotations: newAnnotations }, newImages);
-                        });
-                    }
-                    console.log(`Restored auto-tags for ${tagMap.size} images from cache`);
-                }
-            } catch (error) {
-                console.debug('Smart library cache not available:', error);
-            }
+        // restoreSmartLibraryCache removed — clustering and cache manager deleted
+        restoreSmartLibraryCache: async (_directoryPath, _scanSubfolders) => {
+            // No-op: clustering and smart library cache have been removed.
+            // Auto-tag cache restoration was previously part of this function;
+            // it can be re-added here if needed from a new cache source.
         },
 
 
@@ -2722,20 +2572,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                 console.log(`Cleared auto-tags from ${updatedAnnotations.length} images`);
             }
 
-            // Invalidate on-disk auto-tag cache for all directories so
-            // restoreSmartLibraryCache doesn't re-apply stale auto-tags.
-            try {
-                const { invalidateAutoTagCache } = await import('../services/clusterCacheManager');
-                for (const dir of directories) {
-                    // Invalidate both scanSubfolders variants — the cache key
-                    // includes this flag, and a user may have changed the setting
-                    // since the cache was written.
-                    await invalidateAutoTagCache(dir.path, false, 'user_cleared');
-                    await invalidateAutoTagCache(dir.path, true, 'user_cleared');
-                }
-            } catch (error) {
-                console.error('Failed to invalidate auto-tag cache files:', error);
-            }
+            // clusterCacheManager removed — auto-tag cache invalidation disabled
         },
 
         flushPendingImages: () => {

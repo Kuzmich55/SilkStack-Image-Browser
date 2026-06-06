@@ -1,6 +1,6 @@
 /// <reference lib="dom" />
 
-import type { ImageAnnotations, TagInfo, ClusterPreference, SmartCollection } from '../types';
+import type { ImageAnnotations, TagInfo, SmartCollection } from '../types';
 import { openDatabase, getIsPersistenceDisabled } from './indexedDb';
 
 const STORE_NAME = 'imageAnnotations';
@@ -417,78 +417,6 @@ export async function clearAllAnnotations(): Promise<void> {
     };
   }).catch((error) => {
     console.error('IndexedDB clear error for image annotations:', error);
-  });
-}
-
-// ===== Cluster Preferences Functions =====
-
-export async function getClusterPreference(clusterId: string): Promise<ClusterPreference | null> {
-  const db = await openDatabase();
-  if (!db) return null;
-
-  return new Promise((resolve) => {
-    const transaction = db.transaction(['clusterPreferences'], 'readonly');
-    const store = transaction.objectStore('clusterPreferences');
-    const request = store.get(clusterId);
-
-    request.onsuccess = () => resolve(request.result || null);
-    request.onerror = () => {
-      console.error('Error getting cluster preference:', request.error);
-      resolve(null);
-    };
-  });
-}
-
-export async function saveClusterPreference(preference: ClusterPreference): Promise<void> {
-  const db = await openDatabase();
-  if (!db) return;
-
-  preference.updatedAt = Date.now();
-
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(['clusterPreferences'], 'readwrite');
-    const store = transaction.objectStore('clusterPreferences');
-    const request = store.put(preference);
-
-    request.onsuccess = () => resolve();
-    request.onerror = () => {
-      console.error('Error saving cluster preference:', request.error);
-      reject(request.error);
-    };
-  });
-}
-
-export async function deleteClusterPreference(clusterId: string): Promise<void> {
-  const db = await openDatabase();
-  if (!db) return;
-
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(['clusterPreferences'], 'readwrite');
-    const store = transaction.objectStore('clusterPreferences');
-    const request = store.delete(clusterId);
-
-    request.onsuccess = () => resolve();
-    request.onerror = () => {
-      console.error('Error deleting cluster preference:', request.error);
-      reject(request.error);
-    };
-  });
-}
-
-export async function getAllClusterPreferences(): Promise<ClusterPreference[]> {
-  const db = await openDatabase();
-  if (!db) return [];
-
-  return new Promise((resolve) => {
-    const transaction = db.transaction(['clusterPreferences'], 'readonly');
-    const store = transaction.objectStore('clusterPreferences');
-    const request = store.getAll();
-
-    request.onsuccess = () => resolve(request.result || []);
-    request.onerror = () => {
-      console.error('Error getting all cluster preferences:', request.error);
-      resolve([]);
-    };
   });
 }
 

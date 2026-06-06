@@ -27,9 +27,7 @@ export interface CacheImageMetadata {
   fileSize?: number;
   fileType?: string;
 
-  // Smart Clustering (Phase 1)
-  clusterId?: string;
-  clusterPosition?: number;
+  // Removed: clusterId, clusterPosition
 }
 
 // Main structure for the JSON cache file
@@ -74,9 +72,7 @@ function toCacheMetadata(images: IndexedImage[]): CacheImageMetadata[] {
     fileSize: img.fileSize,
     fileType: img.fileType,
 
-    // Smart Clustering (Phase 1)
-    clusterId: img.clusterId,
-    clusterPosition: img.clusterPosition,
+    // Removed: clusterId, clusterPosition
   }));
 }
 

@@ -1552,8 +1552,7 @@ function mapIndexedImageToCache(image: IndexedImage): CacheImageMetadata {
     enrichmentState: image.enrichmentState,
     fileSize: image.fileSize,
     fileType: image.fileType,
-    clusterId: image.clusterId,
-    clusterPosition: image.clusterPosition,
+    // Removed: clusterId, clusterPosition
   };
 }
 

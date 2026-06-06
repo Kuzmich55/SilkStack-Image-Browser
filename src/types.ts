@@ -955,10 +955,6 @@ export interface IndexedImage {
   stackGroupId?: string; // Prompt hash — groups images with identical prompts into stacks
   isStackAnalyzed?: boolean; // Whether the image has been checked for stack membership
 
-  // Smart Clustering (Phase 1)
-  clusterId?: string; // Cluster this image belongs to
-  clusterPosition?: number; // Position within cluster (0 = cover image)
-
   // Similarity-based stacking (computed post-indexing, persisted in IndexedDB)
   similarityGroupId?: string; // Similarity group ID — groups images with similar prompts
 }
@@ -1061,22 +1057,7 @@ export interface ComparisonMetadataPanelProps {
   otherImageMetadata?: BaseMetadata | null;
 }
 
-// ===== Smart Clustering & Auto-Tagging Types =====
-
-/**
- * Image cluster - groups images with similar prompts
- */
-export interface ImageCluster {
-  id: string; // Hash-based cluster ID
-  promptHash: string; // Hash of the base prompt
-  basePrompt: string; // Representative prompt text
-  imageIds: string[]; // Array of image IDs in this cluster
-  coverImageId: string; // First image chronologically
-  size: number; // Number of images in cluster
-  similarityThreshold: number; // Threshold used for clustering (0.85-0.90)
-  createdAt: number; // Timestamp of cluster creation
-  updatedAt: number; // Timestamp of last update
-}
+// ===== Auto-Tagging Types =====
 
 /**
  * Auto-generated tag from LLM analysis
@@ -1108,29 +1089,8 @@ export interface SmartCollection {
 export interface SmartCollectionQuery {
   models?: string[];
   userTags?: string[];
-  clusters?: string[];
   dateRange?: { from: number; to: number };
 }
-
-/**
- * User preferences for a specific cluster (stored in IndexedDB)
- */
-export interface ClusterPreference {
-  clusterId: string; // Primary key
-  isExpanded: boolean; // UI state persistence
-  notes?: string; // User notes about cluster
-  updatedAt: number;
-}
-
-/**
- * UI state for stack view
- */
-export interface StackViewState {
-  expandedClusterId: string | null; // Currently expanded stack
-  hoverClusterId: string | null; // Stack being hovered
-  scrubPosition: number; // 0-1 for hover preview
-}
-
 
 /**
  * Sub-group within a stack — images sharing the exact same prompt.
