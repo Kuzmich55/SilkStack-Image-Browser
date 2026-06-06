@@ -376,6 +376,30 @@ Future work:
 
 The similarity threshold is currently a constant (`0.85` in `computeSimilarityGroups`). A natural extension is making this user-configurable via the Settings UI, similar to the Smart Library threshold slider. This would require bumping `SIMILARITY_GROUP_VERSION` to force re-computation when the threshold changes.
 
+### Clearing Stacking Data
+
+To force a full re-analysis of all images (e.g., after changing the similarity threshold or debugging stacking issues), run the reset script from the Electron DevTools console.
+
+**`scripts/clear-stacking-tags.js`** — Clears `stackGroupId`, `similarityGroupId`, and `isStackAnalyzed` from all image annotations in IndexedDB, and removes the similarity version from `localStorage`. The page reloads automatically. On the next launch, `syncNewImagesToStacks` and `computeSimilarityGroups` will re-process every image from scratch with the current algorithm and threshold.
+
+**When to use**: After changing `SIMILARITY_GROUP_VERSION` or the similarity threshold in `computeSimilarityGroups`, existing annotations still have old `similarityGroupId` values. Run this script to clear them and force re-computation.
+
+**How to run**:
+1. Open the app's DevTools — press `Ctrl+Shift+I` (Windows/Linux) or `Cmd+Option+I` (macOS)
+2. In the **Console** tab, type `resetStacking()` and press Enter
+3. The console will show: `Cleared stacking tags from N images. Re-loading annotations...`
+4. Annotations reload in-place — no page refresh needed. Images are re-processed immediately.
+
+Alternatively, copy-paste the contents of `scripts/clear-stacking-tags.js` into the console (useful if the global function is unavailable).
+
+**What it clears**:
+- `stackGroupId` — exact prompt hash
+- `similarityGroupId` — similarity group assignment
+- `isStackAnalyzed` — analysis flag (set to `false`, so images are re-processed)
+- `localStorage.similarityGroupVersion` — version tracker (forces fresh computation)
+
+**Other available scripts**: `scripts/clear-manual-tags.js` — clears only manual tags while preserving auto-tags, metadata-tags, and stacking data.
+
 ### Web Worker Migration
 
 The similarity computation currently runs on the main thread with chunked yielding. For very large libraries (500+ unique prompts), moving the entire `computeSimilarityGroups` logic to a Web Worker (reusing `clusteringWorker.ts` patterns) would eliminate any UI jank during the comparison phase.

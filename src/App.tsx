@@ -202,6 +202,47 @@ export default function App() {
     }
   }, [loadAnnotations, isAnnotationsLoaded]);
 
+  // Register console debug helpers
+  useEffect(() => {
+    (window as any).resetStacking = async () => {
+      const openReq = indexedDB.open('image-metahub-preferences', 7);
+      const db: IDBDatabase = await new Promise((resolve, reject) => {
+        openReq.onsuccess = () => resolve(openReq.result);
+        openReq.onerror = () => reject(openReq.error);
+      });
+      const tx = db.transaction('imageAnnotations', 'readwrite');
+      const store = tx.objectStore('imageAnnotations');
+      const all: any[] = await new Promise((resolve, reject) => {
+        const req = store.getAll();
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+      let count = 0;
+      for (const ann of all) {
+        if (ann.stackGroupId || ann.similarityGroupId || ann.isStackAnalyzed) {
+          ann.stackGroupId = undefined;
+          ann.similarityGroupId = undefined;
+          ann.isStackAnalyzed = false;
+          store.put(ann);
+          count++;
+        }
+      }
+      await new Promise((resolve, reject) => {
+        tx.oncomplete = () => resolve(undefined);
+        tx.onerror = () => reject(tx.error);
+      });
+      db.close();
+      localStorage.removeItem('similarityGroupVersion');
+      console.log(`%cCleared stacking tags from ${count} images.%c Re-processing...`,
+        'color: #4ade80; font-weight: bold', 'color: inherit');
+      // Reload annotations from IndexedDB (now cleared)
+      await useImageStore.getState().loadAnnotations();
+      // Trigger full re-processing: syncNewImagesToStacks assigns stackGroupId,
+      // then automatically schedules computeSimilarityGroups.
+      await useImageStore.getState().syncNewImagesToStacks();
+    };
+  }, []);
+
   const primaryPath = safeDirectories.length > 0 ? safeDirectories[0].path : null;
   const hasImages = safeFilteredImages.length > 0;
   const images = useImageStore((state) => state.images);
