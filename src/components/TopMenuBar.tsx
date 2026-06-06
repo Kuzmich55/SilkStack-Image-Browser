@@ -84,16 +84,18 @@ const TopMenuBar: React.FC<TopMenuBarProps> = ({
                         >
                             Library
                         </button>
+                        {import.meta.env.VITE_AI_FEATURES_AVAILABLE && (
                         <button
                             onClick={() => onLibraryViewChange('smart')}
                             className={`px-3.5 py-1 text-[13.5px] font-semibold rounded-full transition-all duration-200 ${
-                                activeView === 'smart' 
-                                ? 'bg-purple-600 text-white shadow-md shadow-purple-900/20' 
+                                activeView === 'smart'
+                                ? 'bg-purple-600 text-white shadow-md shadow-purple-900/20'
                                 : 'text-gray-400 hover:text-white hover:bg-white/5'
                             }`}
                         >
                             Stacks
                         </button>
+                        )}
                         <button
                             onClick={() => onLibraryViewChange('model')}
                             className={`px-3.5 py-1 text-[13.5px] font-semibold rounded-full transition-all duration-200 ${

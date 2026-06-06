@@ -171,6 +171,45 @@ export async function createEmbeddingProvider(
   }
 }
 
+// ── Stacking Engine ──────────────────────────────────────────────────
+
+export type StackingProgressCallback = (current: number, total: number, message: string) => void;
+
+export interface ISimilarityGroupInput {
+  groups: Array<{ groupId: string; prompt: string }>;
+  threshold?: number;
+  onProgress?: StackingProgressCallback;
+}
+
+export interface ISimilarityGroupResult {
+  groupIdToSimId: Map<string, string>;
+}
+
+export interface IStackingEngine {
+  generatePromptHash(prompt: string): string;
+  normalizePrompt(prompt: string): string;
+  computeSimilarityGroupIds(input: ISimilarityGroupInput): Promise<ISimilarityGroupResult>;
+}
+
+/**
+ * Create a stacking engine for prompt-based image grouping.
+ * Returns `null` if the ai-intelligence module is unavailable.
+ */
+export async function createStackingEngine(): Promise<IStackingEngine | null> {
+  const mod = await loadAiModule();
+  if (!mod) return null;
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const StackingEngine = (mod as any).StackingEngine;
+    if (!StackingEngine) return null;
+    return new StackingEngine() as IStackingEngine;
+  } catch (err) {
+    console.warn('[aiBridge] Failed to create StackingEngine:', err);
+    return null;
+  }
+}
+
 // ── Diagnostics ──────────────────────────────────────────────────────
 
 /** Check whether the ai-intelligence module is available at runtime. */

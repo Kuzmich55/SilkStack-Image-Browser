@@ -2731,6 +2731,8 @@ export const useImageStore = create<ImageState>((set, get) => {
         },
 
         setStackingEnabled: (enabled: boolean) => {
+            // Without ai-intelligence, stacking cannot be enabled
+            if (enabled && !import.meta.env.VITE_AI_FEATURES_AVAILABLE) return;
             set({ isStackingEnabled: enabled });
             // Persist to settings
             useSettingsStore.getState().setStackingEnabled(enabled);
@@ -2749,7 +2751,13 @@ export const useImageStore = create<ImageState>((set, get) => {
             __syncInProgress = true;
 
             try {
-                const { normalizePrompt, generatePromptHash } = await import('../utils/similarityMetrics');
+                const { createStackingEngine } = await import('../services/aiBridge');
+                const engine = await createStackingEngine();
+                if (!engine) {
+                    console.log('[Stacks] AI intelligence not available — skipping stack sync');
+                    return;
+                }
+
                 const { bulkSaveAnnotations } = await import('../services/imageAnnotationsStorage');
 
                 const now = Date.now();
@@ -2767,7 +2775,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                         || image.metadata?.positive_prompt;
 
                     const stackGroupId = prompt && prompt.trim()
-                        ? generatePromptHash(prompt)
+                        ? engine.generatePromptHash(prompt)
                         : undefined;
 
                     const updated: ImageAnnotations = {
@@ -2888,10 +2896,15 @@ export const useImageStore = create<ImageState>((set, get) => {
             };
 
             try {
-                reportProgress(0, 1, 'Loading similarity utilities...');
+                reportProgress(0, 1, 'Loading similarity engine...');
 
-                const { hybridSimilarity, tokenizeForSimilarity, normalizePrompt, generatePromptHash } =
-                    await import('../utils/similarityMetrics');
+                const { createStackingEngine } = await import('../services/aiBridge');
+                const engine = await createStackingEngine();
+                if (!engine) {
+                    console.log('[Stacks] AI intelligence not available — skipping similarity computation');
+                    return;
+                }
+
                 const { bulkSaveAnnotations } = await import('../services/imageAnnotationsStorage');
 
                 let currentAnnotations = new Map(annotations);
@@ -2907,7 +2920,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                         || img.metadata?.normalizedMetadata?.prompt
                         || img.metadata?.positive_prompt;
                     const stackGroupId = prompt && prompt.trim()
-                        ? generatePromptHash(normalizePrompt(prompt))
+                        ? engine.generatePromptHash(prompt)
                         : undefined;
 
                     const updated: ImageAnnotations = {
@@ -2931,8 +2944,8 @@ export const useImageStore = create<ImageState>((set, get) => {
                     await bulkSaveAnnotations(missingStackIds);
                 }
 
-                // ── Step 1: Collect unique stackGroupIds and their base prompts
-                const groupMap = new Map<string, { prompt: string; tokens: Set<string> }>();
+                // ── Step 1: Collect unique stackGroupIds and their prompts ──
+                const groupMap = new Map<string, string>();
                 console.log(`[SimilarityGroups] Scanning ${images.length} images for unique prompts...`);
                 for (const img of images) {
                     const ann = currentAnnotations.get(img.id);
@@ -2943,11 +2956,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                         || img.metadata?.normalizedMetadata?.prompt
                         || img.metadata?.positive_prompt;
                     if (prompt && prompt.trim()) {
-                        const normalized = normalizePrompt(prompt);
-                        groupMap.set(sgId, {
-                            prompt: normalized,
-                            tokens: tokenizeForSimilarity(normalized),
-                        });
+                        groupMap.set(sgId, prompt);
                     }
                 }
 
@@ -2981,99 +2990,14 @@ export const useImageStore = create<ImageState>((set, get) => {
                     return;
                 }
 
-                // Build entries for similarity comparison
-                const entries = Array.from(groupMap.entries()).map(([groupId, info]) => ({
-                    groupId,
-                    ...info,
-                }));
+                // ── Step 2: Delegate clustering to the engine ────────────
+                const { groupIdToSimId } = await engine.computeSimilarityGroupIds({
+                    groups: Array.from(groupMap.entries()).map(([groupId, prompt]) => ({ groupId, prompt })),
+                    threshold: 0.85,
+                    onProgress: reportProgress,
+                });
 
-                // ── Phase 1: Token bucketing ──────────────────────────
-                // Require only 1 shared keyword — prevents missing comparisons
-                // for prompts that share a subject but differ in other details.
-                const MIN_SHARED = 1;
-                const buckets: number[][] = [];
-                for (let i = 0; i < entries.length; i++) {
-                    let added = false;
-                    for (const bucket of buckets) {
-                        const sharesWithBucket = bucket.some(j => {
-                            let shared = 0;
-                            for (const token of entries[i].tokens) {
-                                if (entries[j].tokens.has(token) && ++shared >= MIN_SHARED) return true;
-                            }
-                            return false;
-                        });
-                        if (sharesWithBucket) { bucket.push(i); added = true; break; }
-                    }
-                    if (!added) buckets.push([i]);
-                }
-
-                const totalPairs = buckets.reduce((sum, b) => sum + (b.length * (b.length - 1)) / 2, 0);
-                console.log(`[SimilarityGroups] ${buckets.length} buckets, ${totalPairs} pairwise comparisons`);
-
-                // ── Phase 2: Union-Find similarity clustering ─────────
-                // 0.85 threshold — same as Smart Library default. Only prompts
-                // with very high structural similarity are merged. This keeps
-                // similarity groups tight while still catching near-identical
-                // prompts that differ only in metadata or minor phrasing.
-                const THRESHOLD = 0.85;
-                const parent = Array.from({ length: entries.length }, (_, i) => i);
-                const rank = new Array(entries.length).fill(0);
-                const find = (x: number): number => {
-                    if (parent[x] !== x) parent[x] = find(parent[x]);
-                    return parent[x];
-                };
-                const union = (x: number, y: number) => {
-                    const rx = find(x), ry = find(y);
-                    if (rx === ry) return;
-                    if (rank[rx] < rank[ry]) parent[rx] = ry;
-                    else if (rank[rx] > rank[ry]) parent[ry] = rx;
-                    else { parent[ry] = rx; rank[rx]++; }
-                };
-
-                // Yield to the event loop every N comparisons to keep the UI
-                // responsive. Without this, the main thread is blocked for minutes
-                // on large libraries (Levenshtein is O(n×m) per pair).
-                const YIELD_EVERY = 150;
-                let cmpCount = 0;
-                const totalPairsEstimate = totalPairs || 1;
-
-                reportProgress(0, totalPairsEstimate, 'Comparing prompt similarity...');
-
-                for (const bucket of buckets) {
-                    for (let a = 0; a < bucket.length; a++) {
-                        for (let b = a + 1; b < bucket.length; b++) {
-                            const i = bucket[a], j = bucket[b];
-                            if (find(i) === find(j)) continue;
-                            const score = hybridSimilarity(entries[i].prompt, entries[j].prompt);
-                            if (score >= THRESHOLD) union(i, j);
-
-                            cmpCount++;
-                            if (cmpCount % YIELD_EVERY === 0) {
-                                reportProgress(cmpCount, totalPairsEstimate, 'Comparing prompt similarity...');
-                                await new Promise(resolve => setTimeout(resolve, 0));
-                            }
-                        }
-                    }
-                }
-
-                console.log(`[SimilarityGroups] Compared ${cmpCount} prompt pairs`);
-
-                // ── Phase 3: Assign similarityGroupIds ────────────────
-                // Each Union-Find root gets the groupId of its first entry
-                const rootToSimId = new Map<number, string>();
-                for (let i = 0; i < entries.length; i++) {
-                    const root = find(i);
-                    if (!rootToSimId.has(root)) {
-                        rootToSimId.set(root, entries[i].groupId);
-                    }
-                }
-
-                const groupIdToSimId = new Map<string, string>();
-                for (let i = 0; i < entries.length; i++) {
-                    groupIdToSimId.set(entries[i].groupId, rootToSimId.get(find(i))!);
-                }
-
-                // ── Phase 4: Persist ─────────────────────────────────
+                // ── Step 3: Apply results to annotations ─────────────────
                 reportProgress(0, 1, 'Saving similarity groups...');
                 const now = Date.now();
                 const updatedAnnotations: ImageAnnotations[] = [];
@@ -3109,7 +3033,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                         annotations: newAnnotations,
                     });
 
-                    console.log(`Similarity groups computed: ${groupMap.size} prompts → ${rootToSimId.size} similarity groups (${updatedAnnotations.length} annotations updated)`);
+                    console.log(`Similarity groups computed: ${groupMap.size} prompts → ${updatedAnnotations.length} annotations updated`);
                 }
             } catch (error) {
                 console.error('Failed to compute similarity groups:', error);

@@ -47,4 +47,15 @@ declare module '@ai-images-browser/ai-intelligence' {
   export const TAG_GENERATION_MODEL_ID: string;
   export const EMBEDDING_MODEL_ID: string;
   export const SYSTEM_PROMPT: string;
+
+  // Stacking Engine
+  export class StackingEngine {
+    generatePromptHash(prompt: string): string;
+    normalizePrompt(prompt: string): string;
+    computeSimilarityGroupIds(input: {
+      groups: Array<{ groupId: string; prompt: string }>;
+      threshold?: number;
+      onProgress?: (current: number, total: number, message: string) => void;
+    }): Promise<{ groupIdToSimId: Map<string, string> }>;
+  }
 }

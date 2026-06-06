@@ -2,7 +2,19 @@ import { useMemo } from 'react';
 import { IndexedImage, ImageStack, StackSubGroup } from '../types';
 import { useImageStore } from '../store/useImageStore';
 import { useSettingsStore } from '../store/useSettingsStore';
-import { generatePromptHash } from '../utils/similarityMetrics';
+
+// ── Simple hash for sub-group display keys ──────────────────────────────
+// Used only as React key identifiers for StackSubGroup objects in the UI.
+// Does not need to match the FNV-1a hash from the stacking engine —
+// these hashes are display-only, not computational.
+function simpleHash(str: string): string {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash).toString(16).padStart(8, '0');
+}
 
 interface UseImageStackingResult {
   stackedItems: (IndexedImage | ImageStack)[];
@@ -87,7 +99,7 @@ function buildSubGroups(images: IndexedImage[]): StackSubGroup[] {
     );
     const prompt = resolvePrompt(sorted[0]);
     subGroups.push({
-      promptHash: generatePromptHash(prompt),
+      promptHash: simpleHash(prompt),
       prompt,
       imageIds: sorted.map(img => img.id),
       coverImageId: sorted[0].id,
@@ -151,63 +163,6 @@ function groupByAnnotation(images: IndexedImage[]): StackItem[] {
   return result;
 }
 
-/**
- * Group by exact normalized prompt match (fallback when no annotations exist yet).
- * Same logic as the original hook before similarity was added.
- */
-function groupByExactPrompt(images: IndexedImage[]): StackItem[] {
-  const normalizeText = (text: any): string => {
-    if (typeof text !== 'string') return '';
-    return text.toLowerCase().replace(/[\s\r\n]+/g, ' ').trim();
-  };
-
-  const getPromptKey = (image: IndexedImage) =>
-    normalizeText(image.prompt || image.metadata?.normalizedMetadata?.prompt || image.metadata?.positive_prompt);
-
-  const groups = new Map<string, IndexedImage[]>();
-  const ungrouped: IndexedImage[] = [];
-
-  for (const img of images) {
-    const key = getPromptKey(img);
-    if (key) {
-      const group = groups.get(key);
-      if (group) {
-        group.push(img);
-      } else {
-        groups.set(key, [img]);
-      }
-    } else {
-      ungrouped.push(img);
-    }
-  }
-
-  const result: StackItem[] = [];
-
-  for (const [, groupImages] of groups) {
-    const sorted = [...groupImages].sort(
-      (a, b) => (b.lastModified || 0) - (a.lastModified || 0)
-    );
-
-    if (sorted.length === 1) {
-      result.push(sorted[0]);
-    } else {
-      const subGroups = buildSubGroups(sorted);
-
-      result.push({
-        id: `stack-${sorted[0].id}`,
-        coverImage: sorted[0],
-        images: sorted,
-        count: sorted.length,
-        subGroups,
-        basePrompt: subGroups[0]?.prompt || '',
-      });
-    }
-  }
-
-  result.push(...ungrouped);
-  return result;
-}
-
 // ── Hook ───────────────────────────────────────────────────────────────
 
 export const useImageStacking = (
@@ -222,14 +177,15 @@ export const useImageStacking = (
       return images;
     }
 
-    // If any image has a stackGroupId (set by syncNewImagesToStacks), use the
-    // persisted annotation-based grouping. Otherwise fall back to on-the-fly
-    // exact prompt matching so stacking works before the first sync runs.
+    // When stacking is enabled, group by annotation fields (stackGroupId /
+    // similarityGroupId). These are populated by the store actions only when
+    // the ai-intelligence stacking engine is available. If no annotations
+    // exist yet, return ungrouped images — the engine will process them.
     const hasAnnotations = images.some(img => img.stackGroupId !== undefined);
 
     const items = hasAnnotations
       ? groupByAnnotation(images)
-      : groupByExactPrompt(images);
+      : images;
 
     return sortItems(items, sortOrder, displayStarredFirst);
   }, [images, isEnabled, sortOrder, displayStarredFirst]);

@@ -204,6 +204,8 @@ export default function App() {
 
   // Register console debug helpers
   useEffect(() => {
+    if (!import.meta.env.VITE_AI_FEATURES_AVAILABLE) return;
+
     (window as any).resetStacking = async () => {
       const openReq = indexedDB.open('image-metahub-preferences', 7);
       const db: IDBDatabase = await new Promise((resolve, reject) => {
@@ -322,6 +324,8 @@ export default function App() {
 
   // Escape from stack view back to library
   useEffect(() => {
+    if (!import.meta.env.VITE_AI_FEATURES_AVAILABLE) return;
+
     const handler = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       // Don't intercept if a modal, input, or textarea is focused
@@ -998,7 +1002,7 @@ export default function App() {
               ) : (
                 <div className="h-full">
                   {activeView === 'smart' ? (
-                    <Stacks />
+                    import.meta.env.VITE_AI_FEATURES_AVAILABLE ? <Stacks /> : null
                   ) : activeView === 'model' ? (
                     <ModelView 
                       onModelSelect={(modelName) => {
@@ -1008,7 +1012,7 @@ export default function App() {
                     />
                   ) : (
                     <div className="h-full">
-                      {libraryStackContext ? (
+                      {import.meta.env.VITE_AI_FEATURES_AVAILABLE && libraryStackContext ? (
                         <SimilarityStackExpandedView
                           images={safeFilteredImages}
                           subGroups={libraryStackContext.subGroups || []}

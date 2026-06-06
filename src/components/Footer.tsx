@@ -175,7 +175,7 @@ const Footer: React.FC<FooterProps> = ({
       <div className="flex items-center gap-2 ml-auto">
         <div className="w-px h-4 bg-gray-700/50 mx-2" />
         {/* Stacking Toggle */}
-        {showStackingToggle && (
+        {import.meta.env.VITE_AI_FEATURES_AVAILABLE && showStackingToggle && (
           <button
             onClick={() => setStackingEnabled(!isStackingEnabled)}
             className={`p-1.5 rounded-lg transition-all duration-200 ${
