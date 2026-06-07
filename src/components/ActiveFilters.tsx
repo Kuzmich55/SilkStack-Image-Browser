@@ -114,7 +114,7 @@ const ActiveFilters: React.FC = () => {
             {advancedFilters?.aspectRatio && (
                 <div className="flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-indigo-900/40 text-indigo-200 border border-indigo-700/50 flex-shrink-0 animate-fade-in">
                     <Settings size={10} />
-                    <span>{advancedFilters.aspectRatio}</span>
+                    <span>Aspect: {advancedFilters.aspectRatio.charAt(0).toUpperCase() + advancedFilters.aspectRatio.slice(1)}</span>
                     <button
                         onClick={() => removeAdvancedFilter('aspectRatio')}
                         className="ml-1 hover:text-indigo-100 rounded-full hover:bg-indigo-800/50 p-0.5 transition-colors"

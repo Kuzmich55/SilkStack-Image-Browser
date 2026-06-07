@@ -925,6 +925,10 @@ export const useImageStore = create<ImageState>((set, get) => {
                     if (!image.dimensions) return false;
                     const [w, h] = image.dimensions.split('x').map(Number);
                     if (!w || !h) return false;
+                    // Handle orientation-based filters
+                    if (advancedFilters.aspectRatio === 'portrait') return h > w;
+                    if (advancedFilters.aspectRatio === 'landscape') return w > h;
+                    if (advancedFilters.aspectRatio === 'square') return w === h;
                     return getImageAspectRatio(w, h) === advancedFilters.aspectRatio;
                 });
             }

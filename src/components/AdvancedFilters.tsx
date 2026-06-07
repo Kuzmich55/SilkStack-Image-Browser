@@ -143,6 +143,9 @@ const AdvancedFilters: React.FC<AdvancedFiltersProps> = ({
                   className="w-full bg-gray-700 text-gray-200 border border-gray-600 rounded-md p-2 text-sm"
                 >
                   <option value="">All ratios</option>
+                  <option value="portrait">Portrait</option>
+                  <option value="landscape">Landscape</option>
+                  <option value="square">Square</option>
                   {availableAspectRatios.map(ratio => (
                     <option key={ratio} value={ratio}>{ratio}</option>
                   ))}
