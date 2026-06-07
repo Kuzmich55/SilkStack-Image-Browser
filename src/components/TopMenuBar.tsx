@@ -104,7 +104,7 @@ const TopMenuBar: React.FC<TopMenuBarProps> = ({
                                 : 'text-gray-400 hover:text-white hover:bg-white/5'
                             }`}
                         >
-                            Model View
+                            Models
                         </button>
                     </div>
                 </div>
