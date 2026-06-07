@@ -65,6 +65,26 @@ const isProduction = Boolean(
   (typeof globalThis !== 'undefined' && (globalThis as any)?.process?.env?.NODE_ENV === 'production') ||
   (typeof import.meta !== 'undefined' && (import.meta as any)?.env?.PROD)
 );
+
+// ── Metadata Worker Pool (lazy-initialized) ──────────────────────────
+// Parses binary metadata off the main thread in parallel.
+let _metadataPool: import('./metadataWorkerPool').MetadataWorkerPool | null = null;
+let _metadataPoolInitFailed = false;
+
+async function getMetadataPool(): Promise<import('./metadataWorkerPool').MetadataWorkerPool | null> {
+  if (_metadataPool) return _metadataPool;
+  if (_metadataPoolInitFailed) return null;
+  try {
+    const { MetadataWorkerPool } = await import('./metadataWorkerPool');
+    if (!_metadataPool) {
+      _metadataPool = new MetadataWorkerPool();
+    }
+    return _metadataPool;
+  } catch {
+    _metadataPoolInitFailed = true;
+    return null;
+  }
+}
 const shouldLogPngDebug = Boolean(
   (typeof globalThis !== 'undefined' && (globalThis as any)?.process?.env?.PNG_DEBUG === 'true') ||
   (typeof import.meta !== 'undefined' && (import.meta as any)?.env?.VITE_PNG_DEBUG)
@@ -1168,26 +1188,54 @@ async function processSingleFileOptimized(
       rawMetadata = videoResult.rawMetadata;
       videoInfo = videoResult.videoInfo ?? null;
     } else if (fileData) {
-      // OPTIMIZED: Parse directly from ArrayBuffer; avoid creating File/Blob
-      const view = new DataView(fileData);
-      const detectedType = detectImageType(view);
-      if (detectedType === 'png') {
-        rawMetadata = await parsePNGMetadata(fileData);
-      } else if (detectedType === 'jpeg') {
-        rawMetadata = await parseJPEGMetadata(fileData);
-      } else if (detectedType === 'webp') {
-        rawMetadata = await parseWebPMetadata(fileData);
+      // Try worker pool first for off-thread parsing
+      const pool = await getMetadataPool();
+      if (pool) {
+        const result = await pool.parse(fileData, fileEntry.handle.name);
+        rawMetadata = result.metadata;
+        if (result.dimensions) {
+          bufferForDimensions = fileData;
+        }
       } else {
-        rawMetadata = null;
+        // Fallback: main-thread parsing
+        const view = new DataView(fileData);
+        const detectedType = detectImageType(view);
+        if (detectedType === 'png') {
+          rawMetadata = await parsePNGMetadata(fileData);
+        } else if (detectedType === 'jpeg') {
+          rawMetadata = await parseJPEGMetadata(fileData);
+        } else if (detectedType === 'webp') {
+          rawMetadata = await parseWebPMetadata(fileData);
+        } else {
+          rawMetadata = null;
+        }
+        bufferForDimensions = fileData;
       }
-      bufferForDimensions = fileData;
       fileSizeValue = fileSizeValue ?? fileData.byteLength;
     } else {
       // Fallback to individual file read (browser path)
       const file = await fileEntry.handle.getFile();
-      const parsed = await parseImageMetadata(file);
-      rawMetadata = parsed.metadata;
-      bufferForDimensions = parsed.buffer;
+      const buffer = await file.arrayBuffer();
+      const pool = await getMetadataPool();
+      if (pool) {
+        const result = await pool.parse(buffer, fileEntry.handle.name);
+        rawMetadata = result.metadata;
+        if (result.dimensions) {
+          bufferForDimensions = buffer;
+        }
+      } else {
+        const detectedType = detectImageType(new DataView(buffer));
+        if (detectedType === 'png') {
+          rawMetadata = await parsePNGMetadata(buffer);
+        } else if (detectedType === 'jpeg') {
+          rawMetadata = await parseJPEGMetadata(buffer);
+        } else if (detectedType === 'webp') {
+          rawMetadata = await parseWebPMetadata(buffer);
+        } else {
+          rawMetadata = null;
+        }
+        bufferForDimensions = buffer;
+      }
       fileSizeValue = fileSizeValue ?? file.size;
     }
 

@@ -1080,11 +1080,13 @@ export function useImageLoader() {
           if (!shouldCancelIndexing(suppressIndexingState)) {
             finalizeDirectoryLoad(directory, { suppressIndexingState });
           }
+          setProgress(null);
         } else {
           if (shouldHydratePreloadedImages && preloadedImages.length > 0) {
             addImages(preloadedImages);
           }
           finalizeDirectoryLoad(directory, { suppressIndexingState });
+          setProgress(null);
         }
       } catch (err) {
         if (!(err instanceof DOMException && err.name === "AbortError")) {

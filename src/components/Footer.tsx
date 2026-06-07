@@ -66,12 +66,14 @@ const Footer: React.FC<FooterProps> = ({
   const setEnableSafeMode = useSettingsStore((state) => state.setEnableSafeMode);
   const isStackingEnabled = useImageStore((state) => state.isStackingEnabled);
   const setStackingEnabled = useImageStore((state) => state.setStackingEnabled);
+  const indexingProgress = useImageStore((state) => state.progress);
 
   const hasEnrichmentJob = enrichmentProgress && enrichmentProgress.total > 0;
   const hasAutoTaggingJob = autoTaggingProgress && autoTaggingProgress.total > 0;
   const hasClusteringJob = clusteringProgress && clusteringProgress.total > 0;
   const hasSimilarityGroupJob = similarityGroupProgress && similarityGroupProgress.total > 0;
-  const hasAnyProgressJob = hasEnrichmentJob || hasAutoTaggingJob || hasClusteringJob || hasSimilarityGroupJob;
+  const hasIndexingJob = indexingProgress && indexingProgress.total > 0;
+  const hasAnyProgressJob = hasEnrichmentJob || hasAutoTaggingJob || hasClusteringJob || hasSimilarityGroupJob || hasIndexingJob;
 
   return (
     <footer className={`sticky bottom-0 px-6 flex items-center gap-4 bg-gray-900/90 backdrop-blur-md border-t border-gray-800/60 transition-all duration-300 shadow-footer-up ${hasAnyProgressJob ? 'h-14 md:h-16' : 'h-12 md:h-14'}`}>
@@ -95,6 +97,20 @@ const Footer: React.FC<FooterProps> = ({
         )}
         {hasAnyProgressJob && (
           <div className="flex items-center gap-3">
+            {hasIndexingJob && (
+              <div className="flex items-center gap-3 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs shadow-sm animate-in fade-in slide-in-from-bottom-2">
+                <div className="flex items-center gap-2">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                  <span className="font-medium">Files {indexingProgress!.current}/{indexingProgress!.total}</span>
+                </div>
+                <div className="w-20 h-1.5 bg-gray-700/50 rounded-full overflow-hidden">
+                  <div className="h-full bg-emerald-500 transition-all duration-500 ease-out" style={{ width: `${(indexingProgress!.current / indexingProgress!.total) * 100}%` }} />
+                </div>
+              </div>
+            )}
             {hasEnrichmentJob && (
               <div className="flex items-center gap-3 px-3 py-1.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs shadow-sm animate-in fade-in slide-in-from-bottom-2">
                 <div className="flex items-center gap-2">
