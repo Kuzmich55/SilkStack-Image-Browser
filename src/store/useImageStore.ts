@@ -2912,35 +2912,45 @@ export const useImageStore = create<ImageState>((set, get) => {
                 let currentAnnotations = new Map(annotations);
 
                 // ── Step 0: Ensure all images have stackGroupId ──────────
+                // Also tracks which stackGroupIds need similarity assignment
+                // (images with stackGroupId but no similarityGroupId yet).
                 reportProgress(0, images.length, 'Assigning prompt IDs...');
                 const missingStackIds: ImageAnnotations[] = [];
                 const newStackGroupIds = new Set<string>();
                 for (const img of images) {
                     const ann = currentAnnotations.get(img.id);
-                    if (ann?.stackGroupId) continue; // Already has it
 
-                    const prompt = img.prompt
-                        || img.metadata?.normalizedMetadata?.prompt
-                        || img.metadata?.positive_prompt;
-                    const stackGroupId = prompt && prompt.trim()
-                        ? engine.generatePromptHash(prompt)
-                        : undefined;
+                    if (!ann?.stackGroupId) {
+                        // Image was never analyzed — assign stackGroupId now
+                        const prompt = img.prompt
+                            || img.metadata?.normalizedMetadata?.prompt
+                            || img.metadata?.positive_prompt;
+                        const stackGroupId = prompt && prompt.trim()
+                            ? engine.generatePromptHash(prompt)
+                            : undefined;
 
-                    const updated: ImageAnnotations = {
-                        imageId: img.id,
-                        isFavorite: ann?.isFavorite ?? false,
-                        tags: ann?.tags ?? [],
-                        autoTags: ann?.autoTags ?? [],
-                        metadataTags: ann?.metadataTags ?? [],
-                        isAutoTagged: ann?.isAutoTagged,
-                        stackGroupId,
-                        isStackAnalyzed: true,
-                        addedAt: ann?.addedAt ?? Date.now(),
-                        updatedAt: Date.now(),
-                    };
-                    missingStackIds.push(updated);
-                    currentAnnotations.set(img.id, updated);
-                    if (stackGroupId) newStackGroupIds.add(stackGroupId);
+                        const updated: ImageAnnotations = {
+                            imageId: img.id,
+                            isFavorite: ann?.isFavorite ?? false,
+                            tags: ann?.tags ?? [],
+                            autoTags: ann?.autoTags ?? [],
+                            metadataTags: ann?.metadataTags ?? [],
+                            isAutoTagged: ann?.isAutoTagged,
+                            stackGroupId,
+                            isStackAnalyzed: true,
+                            addedAt: ann?.addedAt ?? Date.now(),
+                            updatedAt: Date.now(),
+                        };
+                        missingStackIds.push(updated);
+                        currentAnnotations.set(img.id, updated);
+                        if (stackGroupId) newStackGroupIds.add(stackGroupId);
+                    } else if (ann.stackGroupId && !ann.similarityGroupId) {
+                        // Image has exact-match group but was never similarity-merged.
+                        // This happens when syncNewImagesToStacks already ran and
+                        // assigned stackGroupId, but computeSimilarityGroups was
+                        // deferred — the image needs incremental matching now.
+                        newStackGroupIds.add(ann.stackGroupId);
+                    }
                 }
 
                 if (missingStackIds.length > 0) {
@@ -3052,7 +3062,19 @@ export const useImageStore = create<ImageState>((set, get) => {
                     }
                 }
 
-                // ── Step 4: Apply results to annotations ─────────────────
+                // ── Step 4: Seed existing mappings so they pass through unchanged ──
+                // Without this, existing stackGroupIds not in groupIdToSimId would
+                // fall back to their own stackGroupId, ejecting them from their
+                // similarity groups.
+                for (const [imageId, annotation] of currentAnnotations) {
+                    const sgId = annotation.stackGroupId;
+                    if (!sgId || groupIdToSimId.has(sgId)) continue;
+                    // Preserve the existing similarityGroupId mapping for unchanged groups
+                    const existingSimId = annotation.similarityGroupId || sgId;
+                    groupIdToSimId.set(sgId, existingSimId);
+                }
+
+                // ── Step 5: Apply results to annotations ─────────────────
                 reportProgress(0, 1, 'Saving similarity groups...');
                 const now = Date.now();
                 const updatedAnnotations: ImageAnnotations[] = [];
