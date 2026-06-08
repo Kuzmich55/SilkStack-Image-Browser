@@ -27,6 +27,19 @@ const SIMILARITY_VERSION_KEY = 'similarityGroupVersion';
 let __syncInProgress = false;
 let __similaritySyncInProgress = false;
 
+// ── Undo stack (session-only) ───────────────────────────────────────────
+// Captures pre-merge annotation snapshots so Ctrl+Z can restore them.
+interface UndoEntry {
+  description: string;
+  previousAnnotations: Array<{
+    imageId: string;
+    stackGroupId?: string;
+    similarityGroupId?: string;
+  }>;
+}
+const __undoStack: UndoEntry[] = [];
+const MAX_UNDO_STACK = 20;
+
 const loadRecentTags = (): string[] => {
     if (typeof window === 'undefined') {
         return [];
@@ -195,6 +208,7 @@ interface ImageState {
   previewImage: IndexedImage | null;
   focusedImageIndex: number | null;
   isStackingEnabled: boolean;
+  undoAvailable: boolean;
   scanSubfolders: boolean;
   libraryStackContext: LibraryStackContext | null;  // For Back to Stacks navigation (ID-based, preserves search bar)
   isFullscreenMode: boolean;
@@ -310,6 +324,8 @@ interface ImageState {
   syncNewImagesToStacks: () => Promise<void>;
   handleStackImageDeletion: (deletedImageIds: string[]) => void;
   mergeSelectedToStack: () => Promise<void>;
+  unmergeSelectedFromStack: () => Promise<void>;
+  tryUndo: () => Promise<boolean>;
   computeSimilarityGroups: () => Promise<void>;
   setFullscreenMode: (isFullscreen: boolean) => void;
 
@@ -1110,6 +1126,7 @@ export const useImageStore = create<ImageState>((set, get) => {
         selectedImages: new Set(),
         focusedImageIndex: null,
         isStackingEnabled: false,
+        undoAvailable: false,
         searchQuery: '',
         availableModels: [],
         availableLoras: [],
@@ -1126,7 +1143,6 @@ export const useImageStore = create<ImageState>((set, get) => {
         libraryStackContext: null,
         activeView: 'library',
         isFullscreenMode: false,
-
 
         // Annotations initial values
         annotations: new Map(),
@@ -2695,6 +2711,7 @@ export const useImageStore = create<ImageState>((set, get) => {
             libraryStackContext: null,
             sortOrder: useSettingsStore.getState().sortOrder || 'date-desc',
             isFullscreenMode: false,
+            undoAvailable: false,
             annotations: new Map(),
             availableTags: [],
             selectionFavoriteCount: 0,
@@ -2885,6 +2902,7 @@ export const useImageStore = create<ImageState>((set, get) => {
          * together.  Also clears the selection on success.
          */
         mergeSelectedToStack: async () => {
+            if (!import.meta.env.VITE_AI_FEATURES_AVAILABLE) return;
             const state = get();
             const { selectedImages, images, annotations } = state;
 
@@ -2917,6 +2935,17 @@ export const useImageStore = create<ImageState>((set, get) => {
             }
 
             if (involvedImageIds.size < 2) return;
+
+            // ── 1a. Save pre-merge snapshot for Ctrl+Z undo ───────────────
+            const preMergeSnapshot: UndoEntry['previousAnnotations'] = [];
+            for (const imageId of involvedImageIds) {
+                const ann = annotations.get(imageId);
+                preMergeSnapshot.push({
+                    imageId,
+                    stackGroupId: ann?.stackGroupId,
+                    similarityGroupId: ann?.similarityGroupId,
+                });
+            }
 
             // ── 2. Choose a target similarityGroupId ──────────────────────
             // Reuse an existing similarityGroupId from one of the selected
@@ -2961,6 +2990,16 @@ export const useImageStore = create<ImageState>((set, get) => {
             try {
                 const { bulkSaveAnnotations } = await import('../services/imageAnnotationsStorage');
                 await bulkSaveAnnotations(updatedAnnotations);
+
+                // Push undo entry only after persistence succeeds
+                __undoStack.push({
+                    description: `Merge ${involvedImageIds.size} images into stack`,
+                    previousAnnotations: preMergeSnapshot,
+                });
+                // Keep the stack bounded
+                while (__undoStack.length > MAX_UNDO_STACK) {
+                    __undoStack.shift();
+                }
             } catch (err) {
                 console.error('[mergeSelectedToStack] Failed to persist annotations:', err);
             }
@@ -2976,7 +3015,196 @@ export const useImageStore = create<ImageState>((set, get) => {
                 images: updatedImages,
                 annotations: newAnnotations,
                 selectedImages: new Set(),
+                undoAvailable: __undoStack.length > 0,
             });
+        },
+
+        /**
+         * Remove selected images from their current stack by clearing
+         * their similarityGroupId.  Only meaningful when viewing a stack
+         * drill-down (libraryStackContext is set).
+         */
+        unmergeSelectedFromStack: async () => {
+            if (!import.meta.env.VITE_AI_FEATURES_AVAILABLE) return;
+
+            const state = get();
+            const { selectedImages, annotations, libraryStackContext } = state;
+
+            if (selectedImages.size === 0 || !libraryStackContext) return;
+
+            // Only unmerge images that are actually in the current stack
+            const stackImageIds = new Set(libraryStackContext.imageIds);
+            const toUnmerge = [...selectedImages].filter(id => stackImageIds.has(id));
+            if (toUnmerge.length === 0) return;
+
+            // Save pre-unmerge snapshot for Ctrl+Z undo
+            const preUnmergeSnapshot: UndoEntry['previousAnnotations'] = [];
+            for (const imageId of toUnmerge) {
+                const ann = annotations.get(imageId);
+                preUnmergeSnapshot.push({
+                    imageId,
+                    stackGroupId: ann?.stackGroupId,
+                    similarityGroupId: ann?.similarityGroupId,
+                });
+            }
+
+            const updatedAnnotations: ImageAnnotations[] = [];
+            const newAnnotations = new Map(annotations);
+
+            for (const imageId of toUnmerge) {
+                const existing = annotations.get(imageId);
+                if (!existing?.similarityGroupId && !existing?.stackGroupId) continue; // already standalone
+
+                const updated: ImageAnnotations = {
+                    ...existing,
+                    stackGroupId: undefined,
+                    similarityGroupId: undefined,
+                    // Keep isStackAnalyzed true — prevents the image from
+                    // being automatically re-grouped on the next sync.
+                    updatedAt: Date.now(),
+                };
+                updatedAnnotations.push(updated);
+                newAnnotations.set(imageId, updated);
+            }
+
+            if (updatedAnnotations.length === 0) return;
+
+            // Persist
+            try {
+                const { bulkSaveAnnotations } = await import('../services/imageAnnotationsStorage');
+                await bulkSaveAnnotations(updatedAnnotations);
+
+                // Push undo entry
+                __undoStack.push({
+                    description: `Unmerge ${toUnmerge.length} image${toUnmerge.length > 1 ? 's' : ''} from stack`,
+                    previousAnnotations: preUnmergeSnapshot,
+                });
+                while (__undoStack.length > MAX_UNDO_STACK) {
+                    __undoStack.shift();
+                }
+            } catch (err) {
+                console.error('[unmergeSelectedFromStack] Failed to persist:', err);
+                return;
+            }
+
+            // Remove unmerged images from the libraryStackContext so they
+            // disappear from the stack view immediately.
+            const unmergedSet = new Set(toUnmerge);
+            const updatedStackContext = {
+                ...libraryStackContext,
+                imageIds: libraryStackContext.imageIds.filter(id => !unmergedSet.has(id)),
+            };
+
+            // Update in-memory state + clear selection
+            const updatedImages = applyAnnotationsToImages(state.images, newAnnotations);
+            const filteredResult = filterAndSort({ ...state, images: updatedImages, annotations: newAnnotations, libraryStackContext: updatedStackContext });
+            const availableFilters = recalculateAvailableFilters(filteredResult.filteredImages);
+
+            set({
+                ...filteredResult,
+                ...availableFilters,
+                images: updatedImages,
+                annotations: newAnnotations,
+                libraryStackContext: updatedStackContext,
+                selectedImages: new Set(),
+                undoAvailable: __undoStack.length > 0,
+            });
+        },
+
+        /**
+         * Undo the most recent merge by restoring the pre-merge annotation
+         * snapshot.  Returns true if an undo was performed, false if the
+         * undo stack is empty.
+         */
+        tryUndo: async (): Promise<boolean> => {
+            if (!import.meta.env.VITE_AI_FEATURES_AVAILABLE) return false;
+            const entry = __undoStack.pop();
+            if (!entry) return false;
+
+            const state = get();
+            const { annotations } = state;
+
+            // Build restored annotations from the snapshot
+            const restoredAnnotations: ImageAnnotations[] = [];
+            const newAnnotations = new Map(annotations);
+
+            for (const snap of entry.previousAnnotations) {
+                const existing = annotations.get(snap.imageId);
+                if (!existing) continue;
+
+                // Skip if nothing changed (shouldn't happen, but safe)
+                if (
+                    existing.stackGroupId === snap.stackGroupId &&
+                    existing.similarityGroupId === snap.similarityGroupId
+                ) continue;
+
+                const restored: ImageAnnotations = {
+                    ...existing,
+                    stackGroupId: snap.stackGroupId,
+                    similarityGroupId: snap.similarityGroupId,
+                    updatedAt: Date.now(),
+                };
+                restoredAnnotations.push(restored);
+                newAnnotations.set(snap.imageId, restored);
+            }
+
+            if (restoredAnnotations.length === 0) return false;
+
+            // Persist the restored annotations
+            try {
+                const { bulkSaveAnnotations } = await import('../services/imageAnnotationsStorage');
+                await bulkSaveAnnotations(restoredAnnotations);
+            } catch (err) {
+                console.error('[tryUndo] Failed to persist restored annotations:', err);
+                // Put the entry back so the user can retry
+                __undoStack.push(entry);
+                return false;
+            }
+
+            // If we're inside a stack view, re-add restored images that now
+            // belong to the stack (e.g. undoing an unmerge).
+            let updatedStackContext = state.libraryStackContext;
+            if (updatedStackContext) {
+                // Collect the similarityGroupId(s) of images still in the stack
+                const stackGroupIds = new Set<string>();
+                for (const id of updatedStackContext.imageIds) {
+                    const ann = newAnnotations.get(id);
+                    if (ann?.similarityGroupId) stackGroupIds.add(ann.similarityGroupId);
+                }
+                // Re-add restored images whose group matches the stack's group
+                const reAddIds = restoredAnnotations
+                    .filter(a => a.similarityGroupId && stackGroupIds.has(a.similarityGroupId))
+                    .map(a => a.imageId)
+                    .filter(id => !updatedStackContext!.imageIds.includes(id));
+
+                if (reAddIds.length > 0) {
+                    updatedStackContext = {
+                        ...updatedStackContext,
+                        imageIds: [...updatedStackContext.imageIds, ...reAddIds],
+                    };
+                }
+            }
+
+            // Update in-memory state
+            const updatedImages = applyAnnotationsToImages(state.images, newAnnotations);
+            const filteredResult = filterAndSort({
+                ...state,
+                images: updatedImages,
+                annotations: newAnnotations,
+                libraryStackContext: updatedStackContext,
+            });
+            const availableFilters = recalculateAvailableFilters(filteredResult.filteredImages);
+
+            set({
+                ...filteredResult,
+                ...availableFilters,
+                images: updatedImages,
+                annotations: newAnnotations,
+                libraryStackContext: updatedStackContext,
+                undoAvailable: __undoStack.length > 0,
+            });
+
+            return true;
         },
 
         /**

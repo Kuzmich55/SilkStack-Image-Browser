@@ -91,6 +91,7 @@ export default function App() {
 
   const isStackingEnabled = useImageStore((state) => state.isStackingEnabled);
   const setStackingEnabled = useImageStore((state) => state.setStackingEnabled);
+  const undoAvailable = useImageStore((state) => state.undoAvailable);
   const libraryStackContext = useImageStore((state) => state.libraryStackContext);
   const setLibraryStackContext = useImageStore((state) => state.setLibraryStackContext);
   const isAnnotationsLoaded = useImageStore((state) => state.isAnnotationsLoaded);
@@ -143,6 +144,7 @@ export default function App() {
   const syncNewImagesToStacks = useImageStore((state) => state.syncNewImagesToStacks);
   const handleStackImageDeletion = useImageStore((state) => state.handleStackImageDeletion);
   const mergeSelectedToStack = useImageStore((state) => state.mergeSelectedToStack);
+  const unmergeSelectedFromStack = useImageStore((state) => state.unmergeSelectedFromStack);
 
   const safeFilteredImages = Array.isArray(filteredImages) ? filteredImages : [];
   const navigationImages = clusterNavigationContext && clusterNavigationContext.length > 0
@@ -339,6 +341,27 @@ export default function App() {
         setStackingEnabled(true);
         setLibraryStackContext(null);
       }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  // Ctrl+Z: Undo last merge
+  useEffect(() => {
+    if (!import.meta.env.VITE_AI_FEATURES_AVAILABLE) return;
+
+    const handler = (e: KeyboardEvent) => {
+      if (!e.ctrlKey || e.shiftKey || e.key !== 'z') return;
+
+      // Don't intercept when the user is typing in an input
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.contentEditable === 'true') return;
+
+      // Don't intercept when a modal is open
+      if (document.querySelector('[role="dialog"]')) return;
+
+      e.preventDefault();
+      useImageStore.getState().tryUndo();
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -1093,6 +1116,8 @@ export default function App() {
                   onDeleteSelected={handleDeleteSelectedImages}
                   onClearSelection={clearSelection}
                   onMergeSelected={mergeSelectedToStack}
+                  isInStackView={!!libraryStackContext}
+                  onUnmergeSelected={unmergeSelectedFromStack}
                 />
               )}
             </Footer>
@@ -1143,10 +1168,12 @@ export default function App() {
         onOpenSettings={handleOpenHotkeySettings}
       />
 
-      <TopMenuBar 
+      <TopMenuBar
         onOpenSettings={(tab) => handleOpenSettings(tab || 'general')}
         onAddFolder={handleSelectFolder}
         onToggleView={toggleViewMode}
+        onUndo={() => useImageStore.getState().tryUndo()}
+        hasUndo={undoAvailable}
         isSidebarCollapsed={isSidebarCollapsed}
         hasDirectories={hasDirectories}
         activeView={activeView}

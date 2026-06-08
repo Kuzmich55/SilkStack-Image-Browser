@@ -7,6 +7,8 @@ interface TopMenuBarProps {
     onOpenSettings: (tab?: 'general' | 'hotkeys' | 'about') => void;
     onAddFolder: () => void;
     onToggleView: () => void;
+    onUndo?: () => void;
+    hasUndo?: boolean;
     activeView?: 'library' | 'smart' | 'model';
     onLibraryViewChange?: (view: 'library' | 'smart' | 'model') => void;
     searchQuery: string;
@@ -19,6 +21,8 @@ const TopMenuBar: React.FC<TopMenuBarProps> = ({
     onOpenSettings,
     onAddFolder,
     onToggleView,
+    onUndo,
+    hasUndo = false,
     activeView,
     onLibraryViewChange,
     searchQuery,
@@ -63,10 +67,12 @@ const TopMenuBar: React.FC<TopMenuBarProps> = ({
         >
             {/* Menu Items */}
             <div className="flex items-center h-full shrink-0 px-1" style={{ WebkitAppRegion: 'no-drag' } as any}>
-                <CustomMenuBar 
+                <CustomMenuBar
                     onOpenSettings={onOpenSettings}
                     onAddFolder={onAddFolder}
                     onToggleView={onToggleView}
+                    onUndo={onUndo}
+                    hasUndo={hasUndo}
                 />
             </div>
 

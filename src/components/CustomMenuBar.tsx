@@ -7,6 +7,7 @@ interface MenuItem {
   shortcut?: string;
   onClick?: () => void;
   type?: 'separator';
+  disabled?: boolean;
 }
 
 interface MenuSection {
@@ -18,12 +19,16 @@ interface CustomMenuBarProps {
   onOpenSettings: (tab?: string) => void;
   onAddFolder: () => void;
   onToggleView: () => void;
+  onUndo?: () => void;
+  hasUndo?: boolean;
 }
 
 const CustomMenuBar: React.FC<CustomMenuBarProps> = ({
   onOpenSettings,
   onAddFolder,
   onToggleView,
+  onUndo,
+  hasUndo = false,
 }) => {
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -55,6 +60,12 @@ const CustomMenuBar: React.FC<CustomMenuBarProps> = ({
         { label: 'Add Folder...', shortcut: 'Ctrl+O', onClick: () => onAddFolder() },
         { label: 'Reload', shortcut: 'Ctrl+R', onClick: () => window.location.reload() },
         { type: 'separator' } as MenuItem,
+        ...(import.meta.env.VITE_AI_FEATURES_AVAILABLE
+          ? [
+              { label: 'Undo', shortcut: 'Ctrl+Z', onClick: () => onUndo?.(), disabled: !hasUndo } as MenuItem,
+              { type: 'separator' as const } as MenuItem,
+            ]
+          : []),
         { label: 'Settings', shortcut: 'Ctrl+,', onClick: () => onOpenSettings('general') },
         { type: 'separator' } as MenuItem,
         { label: 'Exit', shortcut: 'Alt+F4', onClick: () => (window as any).electronAPI?.exitApp() },
@@ -131,12 +142,17 @@ const CustomMenuBar: React.FC<CustomMenuBarProps> = ({
                   ) : (
                     <button
                       key={item.label}
-                      className="w-full flex items-center justify-between px-3.5 py-2 text-sm text-gray-300 hover:bg-blue-500 hover:text-white transition-all duration-150 text-left"
+                      disabled={item.disabled}
+                      className={`w-full flex items-center justify-between px-3.5 py-2 text-sm transition-all duration-150 text-left ${
+                        item.disabled
+                          ? 'text-gray-600 cursor-default'
+                          : 'text-gray-300 hover:bg-blue-500 hover:text-white'
+                      }`}
                       style={{ WebkitAppRegion: 'no-drag' } as any}
-                      onMouseDown={(e) => handleAction(e, item.onClick!)}
+                      onMouseDown={(e) => !item.disabled && handleAction(e, item.onClick!)}
                     >
                       <span className="whitespace-nowrap">{item.label}</span>
-                      {item.shortcut && <span className="text-[11px] opacity-60 ml-6 font-mono whitespace-nowrap">{item.shortcut}</span>}
+                      {item.shortcut && <span className={`text-[11px] ml-6 font-mono whitespace-nowrap ${item.disabled ? 'opacity-30' : 'opacity-60'}`}>{item.shortcut}</span>}
                     </button>
                   )
                 ))}

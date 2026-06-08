@@ -3,7 +3,8 @@ import {
   Star,
   Trash2,
   X,
-  Merge
+  Merge,
+  Unlink
 } from 'lucide-react';
 import { useImageStore } from '../store/useImageStore';
 import { type IndexedImage } from '../types';
@@ -18,6 +19,8 @@ interface GridToolbarProps {
   onDeleteSelected: () => void;
   onClearSelection?: () => void;
   onMergeSelected?: () => void;
+  isInStackView?: boolean;
+  onUnmergeSelected?: () => void;
 }
 
 const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
@@ -39,6 +42,8 @@ const GridToolbar: React.FC<GridToolbarProps> = ({
   onDeleteSelected,
   onClearSelection,
   onMergeSelected,
+  isInStackView = false,
+  onUnmergeSelected,
 }) => {
   const toggleFavorite = useImageStore((state) => state.toggleFavorite);
 
@@ -56,6 +61,7 @@ const GridToolbar: React.FC<GridToolbarProps> = ({
   // It appears when 2+ items are selected unless they all already belong
   // to the exact same similarityGroupId / stackGroupId (i.e. already merged).
   const showMergeButton = useMemo(() => {
+    if (!import.meta.env.VITE_AI_FEATURES_AVAILABLE) return false;
     if (selectedCount < 2 || !onMergeSelected) return false;
 
     // Collect group IDs present among selected images.  An undefined /
@@ -74,8 +80,13 @@ const GridToolbar: React.FC<GridToolbarProps> = ({
     return true;
   }, [selectedCount, onMergeSelected, selectedImagesList]);
 
-
-
+  // Determine whether the unmerge button should be shown.
+  // It appears when viewing a stack drill-down and at least one image is selected.
+  const showUnmergeButton = useMemo(() => {
+    if (!import.meta.env.VITE_AI_FEATURES_AVAILABLE) return false;
+    if (!isInStackView || !onUnmergeSelected) return false;
+    return selectedCount >= 1;
+  }, [isInStackView, onUnmergeSelected, selectedCount]);
 
 
   const handleToggleFavorites = () => {
@@ -178,6 +189,17 @@ const GridToolbar: React.FC<GridToolbarProps> = ({
                   title="Merge selected images and/or stacks"
                 >
                   <Merge className="w-4 h-4" />
+                </button>
+              )}
+
+              {/* Unmerge from Stack */}
+              {showUnmergeButton && (
+                <button
+                  onClick={onUnmergeSelected}
+                  className="p-1.5 text-gray-400 hover:text-amber-400 hover:bg-gray-700 rounded transition-colors"
+                  title="Remove selected images from this stack"
+                >
+                  <Unlink className="w-4 h-4" />
                 </button>
               )}
 
