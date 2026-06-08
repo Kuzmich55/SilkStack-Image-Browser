@@ -1,8 +1,9 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useMemo } from 'react';
 import {
   Star,
   Trash2,
-  X
+  X,
+  Merge
 } from 'lucide-react';
 import { useImageStore } from '../store/useImageStore';
 import { type IndexedImage } from '../types';
@@ -16,6 +17,7 @@ interface GridToolbarProps {
   directories: { id: string; path: string }[];
   onDeleteSelected: () => void;
   onClearSelection?: () => void;
+  onMergeSelected?: () => void;
 }
 
 const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
@@ -36,6 +38,7 @@ const GridToolbar: React.FC<GridToolbarProps> = ({
   directories,
   onDeleteSelected,
   onClearSelection,
+  onMergeSelected,
 }) => {
   const toggleFavorite = useImageStore((state) => state.toggleFavorite);
 
@@ -48,6 +51,28 @@ const GridToolbar: React.FC<GridToolbarProps> = ({
   const firstSelectedImage = selectedImagesList[0];
   // Check if all selected images are favorites
   const allFavorites = selectedImagesList.length > 0 && selectedImagesList.every(img => img.isFavorite);
+
+  // Determine whether the merge button should be shown.
+  // It appears when 2+ items are selected unless they all already belong
+  // to the exact same similarityGroupId / stackGroupId (i.e. already merged).
+  const showMergeButton = useMemo(() => {
+    if (selectedCount < 2 || !onMergeSelected) return false;
+
+    // Collect group IDs present among selected images.  An undefined /
+    // missing group ID means the image is standalone.
+    const groupIds = new Set<string | undefined>();
+    for (const img of selectedImagesList) {
+      const gid = img.similarityGroupId || img.stackGroupId;
+      groupIds.add(gid);
+    }
+
+    // Hide only when every selected image shares the SAME defined group
+    // (already merged into one stack).  All other cases — standalone
+    // images, mixed groups, stacks + images — show the button.
+    if (groupIds.size === 1 && !groupIds.has(undefined)) return false;
+
+    return true;
+  }, [selectedCount, onMergeSelected, selectedImagesList]);
 
 
 
@@ -144,7 +169,18 @@ const GridToolbar: React.FC<GridToolbarProps> = ({
               >
                 <Trash2 className="w-4 h-4" />
               </button>
-              
+
+              {/* Merge into Stack */}
+              {showMergeButton && (
+                <button
+                  onClick={onMergeSelected}
+                  className="p-1.5 text-gray-400 hover:text-blue-400 hover:bg-gray-700 rounded transition-colors"
+                  title="Merge selected images and/or stacks"
+                >
+                  <Merge className="w-4 h-4" />
+                </button>
+              )}
+
               {/* Divider between selection tools and filters if both exist */}
               {hasActiveFilters && <div className="w-px h-6 bg-gray-600 mx-2 flex-shrink-0" />}
             </>

@@ -309,6 +309,7 @@ interface ImageState {
   setLibraryStackContext: (context: LibraryStackContext | null) => void;
   syncNewImagesToStacks: () => Promise<void>;
   handleStackImageDeletion: (deletedImageIds: string[]) => void;
+  mergeSelectedToStack: () => Promise<void>;
   computeSimilarityGroups: () => Promise<void>;
   setFullscreenMode: (isFullscreen: boolean) => void;
 
@@ -2873,6 +2874,109 @@ export const useImageStore = create<ImageState>((set, get) => {
                     annotations: newAnnotations,
                 });
             }
+        },
+
+        /**
+         * Merge selected images and/or stacks into a single stack.
+         *
+         * Collects all directly-selected images AND all images belonging to
+         * any selected stack (identified via its coverImage.id) and assigns
+         * them a common similarityGroupId so the stacking engine groups them
+         * together.  Also clears the selection on success.
+         */
+        mergeSelectedToStack: async () => {
+            const state = get();
+            const { selectedImages, images, annotations } = state;
+
+            if (selectedImages.size < 2) return;
+
+            // ── 1. Collect all image IDs involved in the selection ─────────
+            const directlySelected = new Set(selectedImages);
+            const involvedImageIds = new Set<string>();
+
+            // Collect stack group IDs of directly selected images so we can
+            // pull in every image belonging to those stacks.
+            const selectedStackGroupIds = new Set<string>();
+
+            for (const img of images) {
+                if (directlySelected.has(img.id)) {
+                    involvedImageIds.add(img.id);
+                    if (img.similarityGroupId) selectedStackGroupIds.add(img.similarityGroupId);
+                    if (img.stackGroupId) selectedStackGroupIds.add(img.stackGroupId);
+                }
+            }
+
+            // Add all sibling images from the same stacks
+            for (const img of images) {
+                if (
+                    (img.similarityGroupId && selectedStackGroupIds.has(img.similarityGroupId)) ||
+                    (img.stackGroupId && selectedStackGroupIds.has(img.stackGroupId))
+                ) {
+                    involvedImageIds.add(img.id);
+                }
+            }
+
+            if (involvedImageIds.size < 2) return;
+
+            // ── 2. Choose a target similarityGroupId ──────────────────────
+            // Reuse an existing similarityGroupId from one of the selected
+            // stacks if available; otherwise generate a fresh one.
+            let targetGroupId = '';
+            for (const gid of selectedStackGroupIds) {
+                if (gid) { targetGroupId = gid; break; }
+            }
+            if (!targetGroupId) {
+                targetGroupId = `merged-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+            }
+
+            // ── 3. Build updated annotations ──────────────────────────────
+            const updatedAnnotations: ImageAnnotations[] = [];
+            const newAnnotations = new Map(annotations);
+
+            for (const imageId of involvedImageIds) {
+                const existing = annotations.get(imageId);
+                // Skip if already in the target group
+                if (existing?.similarityGroupId === targetGroupId) continue;
+
+                const updated: ImageAnnotations = {
+                    imageId,
+                    isFavorite: existing?.isFavorite ?? false,
+                    tags: existing?.tags ?? [],
+                    autoTags: existing?.autoTags ?? [],
+                    isAutoTagged: existing?.isAutoTagged ?? false,
+                    metadataTags: existing?.metadataTags ?? [],
+                    stackGroupId: existing?.stackGroupId,
+                    similarityGroupId: targetGroupId,
+                    isStackAnalyzed: existing?.isStackAnalyzed ?? false,
+                    addedAt: existing?.addedAt ?? Date.now(),
+                    updatedAt: Date.now(),
+                };
+                updatedAnnotations.push(updated);
+                newAnnotations.set(imageId, updated);
+            }
+
+            if (updatedAnnotations.length === 0) return;
+
+            // ── 4. Persist ───────────────────────────────────────────────
+            try {
+                const { bulkSaveAnnotations } = await import('../services/imageAnnotationsStorage');
+                await bulkSaveAnnotations(updatedAnnotations);
+            } catch (err) {
+                console.error('[mergeSelectedToStack] Failed to persist annotations:', err);
+            }
+
+            // ── 5. Update in-memory state + clear selection ──────────────
+            const updatedImages = applyAnnotationsToImages(images, newAnnotations);
+            const filteredResult = filterAndSort({ ...state, images: updatedImages, annotations: newAnnotations });
+            const availableFilters = recalculateAvailableFilters(filteredResult.filteredImages);
+
+            set({
+                ...filteredResult,
+                ...availableFilters,
+                images: updatedImages,
+                annotations: newAnnotations,
+                selectedImages: new Set(),
+            });
         },
 
         /**

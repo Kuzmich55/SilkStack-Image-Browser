@@ -142,6 +142,7 @@ export default function App() {
   const restoreSmartLibraryCache = useImageStore((state) => state.restoreSmartLibraryCache);
   const syncNewImagesToStacks = useImageStore((state) => state.syncNewImagesToStacks);
   const handleStackImageDeletion = useImageStore((state) => state.handleStackImageDeletion);
+  const mergeSelectedToStack = useImageStore((state) => state.mergeSelectedToStack);
 
   const safeFilteredImages = Array.isArray(filteredImages) ? filteredImages : [];
   const navigationImages = clusterNavigationContext && clusterNavigationContext.length > 0
@@ -1091,6 +1092,7 @@ export default function App() {
                   directories={safeDirectories}
                   onDeleteSelected={handleDeleteSelectedImages}
                   onClearSelection={clearSelection}
+                  onMergeSelected={mergeSelectedToStack}
                 />
               )}
             </Footer>
