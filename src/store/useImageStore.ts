@@ -2878,14 +2878,12 @@ export const useImageStore = create<ImageState>((set, get) => {
         /**
          * Compute similarity-based groupings from existing exact-match stackGroupIds.
          *
-         * Runs the same hybrid similarity algorithm used by Smart Library clusters
-         * (token bucketing + Jaccard/Levenshtein + Union-Find) to merge similar
-         * exact-match groups into larger similarity groups. Results are persisted
-         * as similarityGroupId on each image's annotation in IndexedDB.
+         * INCREMENTAL MODE: When existing similarity groups are already present,
+         * only the newly-assigned stackGroupIds are compared against existing
+         * group representatives — avoiding a full O(n²) reclustering.
          *
-         * Called after syncNewImagesToStacks assigns exact stackGroupIds.
-         * Runs asynchronously — the UI shows exact-match stacks immediately,
-         * then updates when similarity groups are ready.
+         * FULL MODE (first run): When no similarity groups exist yet, delegates
+         * to the engine for full token-bucketed Union-Find clustering.
          */
         computeSimilarityGroups: async () => {
             const state = get();
@@ -2916,6 +2914,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                 // ── Step 0: Ensure all images have stackGroupId ──────────
                 reportProgress(0, images.length, 'Assigning prompt IDs...');
                 const missingStackIds: ImageAnnotations[] = [];
+                const newStackGroupIds = new Set<string>();
                 for (const img of images) {
                     const ann = currentAnnotations.get(img.id);
                     if (ann?.stackGroupId) continue; // Already has it
@@ -2941,6 +2940,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                     };
                     missingStackIds.push(updated);
                     currentAnnotations.set(img.id, updated);
+                    if (stackGroupId) newStackGroupIds.add(stackGroupId);
                 }
 
                 if (missingStackIds.length > 0) {
@@ -2948,60 +2948,111 @@ export const useImageStore = create<ImageState>((set, get) => {
                     await bulkSaveAnnotations(missingStackIds);
                 }
 
-                // ── Step 1: Collect unique stackGroupIds and their prompts ──
-                const groupMap = new Map<string, string>();
-                console.log(`[SimilarityGroups] Scanning ${images.length} images for unique prompts...`);
+                if (newStackGroupIds.size === 0) {
+                    console.log('[SimilarityGroups] No new prompt groups — nothing to merge');
+                    return;
+                }
+
+                // ── Step 1: Build existing similarity group map ──────────
+                // existingSimGroups: similarityGroupId → representative prompt
+                const existingSimGroups = new Map<string, string>();
                 for (const img of images) {
                     const ann = currentAnnotations.get(img.id);
-                    const sgId = ann?.stackGroupId;
-                    if (!sgId || groupMap.has(sgId)) continue;
+                    const simId = ann?.similarityGroupId;
+                    if (!simId || existingSimGroups.has(simId)) continue;
 
                     const prompt = img.prompt
                         || img.metadata?.normalizedMetadata?.prompt
                         || img.metadata?.positive_prompt;
                     if (prompt && prompt.trim()) {
-                        groupMap.set(sgId, prompt);
+                        existingSimGroups.set(simId, prompt);
                     }
                 }
 
-                console.log(`[SimilarityGroups] Found ${groupMap.size} unique prompt groups`);
+                // ── Step 2: Build new group entries ──────────────────────
+                const newEntries: Array<{ groupId: string; prompt: string }> = [];
+                for (const img of images) {
+                    const ann = currentAnnotations.get(img.id);
+                    const sgId = ann?.stackGroupId;
+                    if (!sgId || !newStackGroupIds.has(sgId) || newEntries.some(e => e.groupId === sgId)) continue;
 
-                if (groupMap.size <= 1) {
-                    console.log('[SimilarityGroups] Only 0-1 unique prompts — skipping similarity merge');
-                    // Single group or none — every image gets its stackGroupId as similarityGroupId
-                    const now = Date.now();
-                    const updatedAnnotations: ImageAnnotations[] = [];
-                    const newAnnotations = new Map(currentAnnotations);
+                    const prompt = img.prompt
+                        || img.metadata?.normalizedMetadata?.prompt
+                        || img.metadata?.positive_prompt;
+                    if (prompt && prompt.trim()) {
+                        newEntries.push({ groupId: sgId, prompt });
+                    }
+                }
 
-                    for (const [imageId, annotation] of currentAnnotations) {
-                        if (annotation.stackGroupId && annotation.similarityGroupId !== annotation.stackGroupId) {
-                            const updated = { ...annotation, similarityGroupId: annotation.stackGroupId, updatedAt: now };
-                            updatedAnnotations.push(updated);
-                            newAnnotations.set(imageId, updated);
+                console.log(`[SimilarityGroups] ${newEntries.length} new prompt groups, ${existingSimGroups.size} existing similarity groups`);
+
+                // ── Step 3: Assign similarityGroupIds ────────────────────
+                let groupIdToSimId: Map<string, string>;
+
+                if (existingSimGroups.size === 0) {
+                    // First run — full clustering of all groups
+                    const allGroups = new Map<string, string>();
+                    for (const img of images) {
+                        const ann = currentAnnotations.get(img.id);
+                        const sgId = ann?.stackGroupId;
+                        if (!sgId || allGroups.has(sgId)) continue;
+                        const prompt = img.prompt
+                            || img.metadata?.normalizedMetadata?.prompt
+                            || img.metadata?.positive_prompt;
+                        if (prompt && prompt.trim()) {
+                            allGroups.set(sgId, prompt);
                         }
                     }
 
-                    if (updatedAnnotations.length > 0) {
-                        await bulkSaveAnnotations(updatedAnnotations);
-                        // Use get().images to preserve thumbnail URLs loaded during async work
-                        const currentImages = get().images;
-                        const imagesWithAnnotations = applyAnnotationsToImages(currentImages, newAnnotations);
-                        const currentState = get();
-                        const filteredResult = filterAndSort({ ...currentState, images: imagesWithAnnotations, annotations: newAnnotations });
-                        const availableFilters = recalculateAvailableFilters(filteredResult.filteredImages);
-                        set({ ...filteredResult, ...availableFilters, images: imagesWithAnnotations, annotations: newAnnotations });
+                    if (allGroups.size <= 1) {
+                        groupIdToSimId = new Map<string, string>();
+                        if (allGroups.size === 1) {
+                            const [sgId] = allGroups.keys();
+                            groupIdToSimId.set(sgId, sgId);
+                        }
+                    } else {
+                        const result = await engine.computeSimilarityGroupIds({
+                            groups: Array.from(allGroups.entries()).map(([groupId, prompt]) => ({ groupId, prompt })),
+                            threshold: 0.85,
+                            onProgress: reportProgress,
+                        });
+                        groupIdToSimId = result.groupIdToSimId;
                     }
-                    return;
+                } else {
+                    // Incremental — only compare new prompts against existing group reps
+                    groupIdToSimId = new Map<string, string>();
+
+                    for (const entry of newEntries) {
+                        let bestMatch: string | null = null;
+                        let bestScore = 0;
+
+                        // Check against existing similarity groups
+                        for (const [simId, repPrompt] of existingSimGroups) {
+                            const score = engine.computePromptSimilarity(entry.prompt, repPrompt);
+                            if (score >= 0.85 && score > bestScore) {
+                                bestScore = score;
+                                bestMatch = simId;
+                            }
+                        }
+
+                        // Also check against other new entries (already-processed ones)
+                        for (const [sgId, simId] of groupIdToSimId) {
+                            const otherEntry = newEntries.find(e => e.groupId === sgId);
+                            if (!otherEntry) continue;
+                            const repPrompt = groupIdToSimId.get(sgId) === sgId ? otherEntry.prompt
+                                : existingSimGroups.get(simId) || otherEntry.prompt;
+                            const score = engine.computePromptSimilarity(entry.prompt, repPrompt);
+                            if (score >= 0.85 && score > bestScore) {
+                                bestScore = score;
+                                bestMatch = simId;
+                            }
+                        }
+
+                        groupIdToSimId.set(entry.groupId, bestMatch || entry.groupId);
+                    }
                 }
 
-                // ── Step 2: Delegate clustering to the engine ────────────
-                const { groupIdToSimId } = await engine.computeSimilarityGroupIds({
-                    groups: Array.from(groupMap.entries()).map(([groupId, prompt]) => ({ groupId, prompt })),
-                    threshold: 0.85,
-                    onProgress: reportProgress,
-                });
-
-                // ── Step 3: Apply results to annotations ─────────────────
+                // ── Step 4: Apply results to annotations ─────────────────
                 reportProgress(0, 1, 'Saving similarity groups...');
                 const now = Date.now();
                 const updatedAnnotations: ImageAnnotations[] = [];
@@ -3022,8 +3073,6 @@ export const useImageStore = create<ImageState>((set, get) => {
                 if (updatedAnnotations.length > 0) {
                     await bulkSaveAnnotations(updatedAnnotations);
 
-                    // Use get().images to preserve thumbnail URLs loaded during
-                    // the async similarity computation (which can take minutes).
                     const currentImages = get().images;
                     const currentState = get();
                     const imagesWithAnnotations = applyAnnotationsToImages(currentImages, newAnnotations);
@@ -3037,7 +3086,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                         annotations: newAnnotations,
                     });
 
-                    console.log(`Similarity groups computed: ${groupMap.size} prompts → ${updatedAnnotations.length} annotations updated`);
+                    console.log(`Similarity groups updated: ${newEntries.length} new prompts → ${updatedAnnotations.length} annotations changed`);
                 }
             } catch (error) {
                 console.error('Failed to compute similarity groups:', error);
@@ -3048,6 +3097,11 @@ export const useImageStore = create<ImageState>((set, get) => {
                 setTimeout(() => get().setSimilarityGroupProgress(null), 1500);
             }
         },
+
+        /**
+         * Internal helper — delegates to the engine for hybrid similarity
+         * scoring between two prompts. Used by the incremental clustering path.
+         */
     };
 });
 

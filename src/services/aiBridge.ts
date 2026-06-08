@@ -188,6 +188,7 @@ export interface ISimilarityGroupResult {
 export interface IStackingEngine {
   generatePromptHash(prompt: string): string;
   normalizePrompt(prompt: string): string;
+  computePromptSimilarity(promptA: string, promptB: string): number;
   computeSimilarityGroupIds(input: ISimilarityGroupInput): Promise<ISimilarityGroupResult>;
 }
 

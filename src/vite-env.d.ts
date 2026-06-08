@@ -52,6 +52,7 @@ declare module '@ai-images-browser/ai-intelligence' {
   export class StackingEngine {
     generatePromptHash(prompt: string): string;
     normalizePrompt(prompt: string): string;
+    computePromptSimilarity(promptA: string, promptB: string): number;
     computeSimilarityGroupIds(input: {
       groups: Array<{ groupId: string; prompt: string }>;
       threshold?: number;
