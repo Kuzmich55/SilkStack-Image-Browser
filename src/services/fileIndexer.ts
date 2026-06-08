@@ -1178,6 +1178,7 @@ async function processSingleFileOptimized(
     let rawMetadata: ImageMetadata | null;
     let sidecarJson: EasyDiffusionJson | null = null;
     let bufferForDimensions: ArrayBuffer | undefined;
+    let workerDims: { width: number; height: number } | null = null;
     let fileSizeValue: number | undefined = fileEntry.size;
     const inferredType = fileEntry.type ?? inferMimeTypeFromName(fileEntry.handle.name);
     const isVideo = isVideoFileName(fileEntry.handle.name) || inferredType.startsWith('video/');
@@ -1193,9 +1194,7 @@ async function processSingleFileOptimized(
       if (pool) {
         const result = await pool.parse(fileData, fileEntry.handle.name);
         rawMetadata = result.metadata;
-        if (result.dimensions) {
-          bufferForDimensions = fileData;
-        }
+        workerDims = result.dimensions; // Worker already extracted these
       } else {
         // Fallback: main-thread parsing
         const view = new DataView(fileData);
@@ -1220,9 +1219,7 @@ async function processSingleFileOptimized(
       if (pool) {
         const result = await pool.parse(buffer, fileEntry.handle.name);
         rawMetadata = result.metadata;
-        if (result.dimensions) {
-          bufferForDimensions = buffer;
-        }
+        workerDims = result.dimensions; // Worker already extracted these
       } else {
         const detectedType = detectImageType(new DataView(buffer));
         if (detectedType === 'png') {
@@ -1462,24 +1459,23 @@ if (rawMetadata) {
     const normalizedFileType = inferredType ?? fallbackType;
     const normalizedFileSize = fileSizeValue ?? 0;
 
-    // Read actual image dimensions - OPTIMIZED: Only if not already in metadata
+    // Read actual image dimensions — use worker result if available,
+    // otherwise fall back to extracting from the (non-detached) buffer.
     const dimensionsStart = profile ? performance.now() : 0;
-    if (bufferForDimensions) {
-      const dims = extractDimensionsFromBuffer(bufferForDimensions);
-      if (dims) {
-        if (!normalizedMetadata) {
-            normalizedMetadata = {
-                prompt: '',
-                model: '',
-                width: dims.width,
-                height: dims.height,
-                steps: 0,
-                scheduler: ''
-            } as BaseMetadata;
-        } else {
-            normalizedMetadata.width = normalizedMetadata.width || dims.width;
-            normalizedMetadata.height = normalizedMetadata.height || dims.height;
-        }
+    const dims = workerDims ?? (bufferForDimensions ? extractDimensionsFromBuffer(bufferForDimensions) : null);
+    if (dims) {
+      if (!normalizedMetadata) {
+          normalizedMetadata = {
+              prompt: '',
+              model: '',
+              width: dims.width,
+              height: dims.height,
+              steps: 0,
+              scheduler: ''
+          } as BaseMetadata;
+      } else {
+          normalizedMetadata.width = normalizedMetadata.width || dims.width;
+          normalizedMetadata.height = normalizedMetadata.height || dims.height;
       }
     }
     if (profile) {

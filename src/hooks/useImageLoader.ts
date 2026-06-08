@@ -634,6 +634,8 @@ export function useImageLoader() {
       }
 
       scheduleGlobalFilterRefresh(true);
+      // Trigger stacking analysis on newly indexed images
+      useImageStore.getState().syncNewImagesToStacks();
       if (!suppressIndexingState) {
         setLoading(false);
         setIndexingState("completed");
@@ -1547,6 +1549,9 @@ export function useImageLoader() {
         log("[auto-watch] Waiting for Phase B to complete...");
         await phaseB;
         log("[auto-watch] Phase B completed!");
+
+        // Trigger stacking analysis on newly watched images
+        useImageStore.getState().syncNewImagesToStacks();
 
         if (getIsElectron() && enrichedForCache.length > 0) {
           try {
