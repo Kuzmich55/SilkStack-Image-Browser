@@ -2964,18 +2964,27 @@ export const useImageStore = create<ImageState>((set, get) => {
                 }
 
                 // ── Step 1: Build existing similarity group map ──────────
-                // existingSimGroups: similarityGroupId → representative prompt
-                const existingSimGroups = new Map<string, string>();
+                // existingSimGroups: similarityGroupId → all distinct prompts
+                // Using ALL prompts per group (not just one representative)
+                // ensures new prompts match reliably even when groups contain
+                // diverse prompt variations.
+                const existingSimGroups = new Map<string, Set<string>>();
                 for (const img of images) {
                     const ann = currentAnnotations.get(img.id);
                     const simId = ann?.similarityGroupId;
-                    if (!simId || existingSimGroups.has(simId)) continue;
+                    if (!simId) continue;
+
+                    let prompts = existingSimGroups.get(simId);
+                    if (!prompts) {
+                        prompts = new Set();
+                        existingSimGroups.set(simId, prompts);
+                    }
 
                     const prompt = img.prompt
                         || img.metadata?.normalizedMetadata?.prompt
                         || img.metadata?.positive_prompt;
                     if (prompt && prompt.trim()) {
-                        existingSimGroups.set(simId, prompt);
+                        prompts.add(prompt.trim());
                     }
                 }
 
@@ -3029,19 +3038,22 @@ export const useImageStore = create<ImageState>((set, get) => {
                         groupIdToSimId = result.groupIdToSimId;
                     }
                 } else {
-                    // Incremental — only compare new prompts against existing group reps
+                    // Incremental — compare new prompts against ALL prompts in
+                    // each existing similarity group (not just one representative).
                     groupIdToSimId = new Map<string, string>();
 
                     for (const entry of newEntries) {
                         let bestMatch: string | null = null;
                         let bestScore = 0;
 
-                        // Check against existing similarity groups
-                        for (const [simId, repPrompt] of existingSimGroups) {
-                            const score = engine.computePromptSimilarity(entry.prompt, repPrompt);
-                            if (score >= 0.85 && score > bestScore) {
-                                bestScore = score;
-                                bestMatch = simId;
+                        // Check against ALL prompts in each existing similarity group
+                        for (const [simId, prompts] of existingSimGroups) {
+                            for (const groupPrompt of prompts) {
+                                const score = engine.computePromptSimilarity(entry.prompt, groupPrompt);
+                                if (score >= 0.85 && score > bestScore) {
+                                    bestScore = score;
+                                    bestMatch = simId;
+                                }
                             }
                         }
 
@@ -3049,9 +3061,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                         for (const [sgId, simId] of groupIdToSimId) {
                             const otherEntry = newEntries.find(e => e.groupId === sgId);
                             if (!otherEntry) continue;
-                            const repPrompt = groupIdToSimId.get(sgId) === sgId ? otherEntry.prompt
-                                : existingSimGroups.get(simId) || otherEntry.prompt;
-                            const score = engine.computePromptSimilarity(entry.prompt, repPrompt);
+                            const score = engine.computePromptSimilarity(entry.prompt, otherEntry.prompt);
                             if (score >= 0.85 && score > bestScore) {
                                 bestScore = score;
                                 bestMatch = simId;
