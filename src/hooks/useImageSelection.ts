@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import { useImageStore } from '../store/useImageStore';
 import { IndexedImage } from '../types';
 import { FileOperations } from '../services/fileOperations';
@@ -19,21 +19,39 @@ export function useImageSelection() {
         setFocusedImageIndex,
     } = useImageStore();
 
+    // ── Stabilize the click callback ──────────────────────────────────
+    // filteredImages, selectedImage, and selectedImages change on almost every
+    // store update.  If handleImageSelection depends on them directly (via
+    // useCallback deps), it changes identity on every render, which cascades
+    // through ImageGrid → itemData → every react-window row re-rendering.
+    // Refs break this chain: the callback identity is stable while always
+    // reading the latest values from the store snapshot.
+    const filteredImagesRef = useRef(filteredImages);
+    filteredImagesRef.current = filteredImages;
+    const selectedImageRef = useRef(selectedImage);
+    selectedImageRef.current = selectedImage;
+    const selectedImagesRef = useRef(selectedImages);
+    selectedImagesRef.current = selectedImages;
+
     const handleImageSelection = useCallback((image: IndexedImage, event: React.MouseEvent) => {
+        const currentFiltered = filteredImagesRef.current;
+        const currentSelectedImage = selectedImageRef.current;
+        const currentSelectedImages = selectedImagesRef.current;
+
         // Update focused index
-        const clickedIndex = filteredImages.findIndex(img => img.id === image.id);
+        const clickedIndex = currentFiltered.findIndex(img => img.id === image.id);
         if (clickedIndex !== -1) {
             setFocusedImageIndex(clickedIndex);
         }
 
-        if (event.shiftKey && selectedImage) {
-            const lastSelectedIndex = filteredImages.findIndex(img => img.id === selectedImage.id);
-            const clickedIndex = filteredImages.findIndex(img => img.id === image.id);
-            if (lastSelectedIndex !== -1 && clickedIndex !== -1) {
-                const start = Math.min(lastSelectedIndex, clickedIndex);
-                const end = Math.max(lastSelectedIndex, clickedIndex);
-                const rangeIds = filteredImages.slice(start, end + 1).map(img => img.id);
-                const newSelection = new Set(selectedImages);
+        if (event.shiftKey && currentSelectedImage) {
+            const lastSelectedIndex = currentFiltered.findIndex(img => img.id === currentSelectedImage.id);
+            const clickedIdx = currentFiltered.findIndex(img => img.id === image.id);
+            if (lastSelectedIndex !== -1 && clickedIdx !== -1) {
+                const start = Math.min(lastSelectedIndex, clickedIdx);
+                const end = Math.max(lastSelectedIndex, clickedIdx);
+                const rangeIds = currentFiltered.slice(start, end + 1).map(img => img.id);
+                const newSelection = new Set(currentSelectedImages);
                 rangeIds.forEach(id => newSelection.add(id));
                 useImageStore.setState({ selectedImages: newSelection });
                 return;
@@ -51,7 +69,7 @@ export function useImageSelection() {
                 const directoryPath = directory?.path || '';
 
                 // Serialize the current filtered list (strip non-serializable handles)
-                const imageListSnapshot = filteredImages.map(({ handle, thumbnailHandle, ...rest }) => rest);
+                const imageListSnapshot = currentFiltered.map(({ handle, thumbnailHandle, ...rest }) => rest);
 
                 // Set selectedImage in store so main window highlights the image in the grid
                 setSelectedImage(image);
@@ -62,7 +80,7 @@ export function useImageSelection() {
                     imageId: image.id,
                     directoryPath,
                     currentIndex: clickedIndex,
-                    totalImages: filteredImages.length,
+                    totalImages: currentFiltered.length,
                     imageList: imageListSnapshot,
                 }).then((result) => {
                     if (result?.success && result.windowId !== undefined) {
@@ -78,7 +96,7 @@ export function useImageSelection() {
                 useImageStore.setState({ selectedImages: new Set([image.id]) });
             }
         }
-    }, [filteredImages, selectedImage, selectedImages, toggleImageSelection, clearImageSelection, setSelectedImage, setFocusedImageIndex]);
+    }, [toggleImageSelection, clearImageSelection, setSelectedImage, setFocusedImageIndex]);
 
     const handleDeleteSelectedImages = useCallback(async () => {
         if (selectedImages.size === 0) return;

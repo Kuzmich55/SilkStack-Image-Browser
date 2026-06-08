@@ -3,6 +3,7 @@ import AutoSizer from 'react-virtualized-auto-sizer';
 import { computeJustifiedLayout, getItemAspectRatio, type LayoutRow } from '../utils/layoutAlgo';
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { flushSync } from 'react-dom';
 import { type IndexedImage, type BaseMetadata, ImageStack, type LibraryStackContext } from '../types';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useImageStore } from '../store/useImageStore';
@@ -531,7 +532,7 @@ interface ImageGridProps {
   disableStacking?: boolean;
 }
 
-const ImageGrid: React.FC<ImageGridProps & { width: number; height: number }> = ({ width, height, images, onImageClick, selectedImages, disableStacking }) => {
+const ImageGrid: React.FC<ImageGridProps & { width: number; height: number }> = React.memo(({ width, height, images, onImageClick, selectedImages, disableStacking }) => {
   const imageSize = useSettingsStore((state) => state.viewZoomLevels.library);
   const sensitiveTags = useSettingsStore((state) => state.sensitiveTags);
   const blurSensitiveImages = useSettingsStore((state) => state.blurSensitiveImages);
@@ -576,7 +577,7 @@ const ImageGrid: React.FC<ImageGridProps & { width: number; height: number }> = 
     if (scrollStateRef.current.key === scrollKey && pendingRestoreKeyRef.current === null) {
       const scrollTop = e.currentTarget.scrollTop;
       scrollStateRef.current.top = scrollTop;
-      
+
       // Update anchor for resize tracking ONLY if not actively resizing (debounce 250ms)
       if (Date.now() - lastResizeTimeRef.current > 250) {
         let currentY = 0;
@@ -609,7 +610,6 @@ const ImageGrid: React.FC<ImageGridProps & { width: number; height: number }> = 
   }, [setFolderScrollPosition]);
 
   const imageCardsRef = useRef<Map<string, HTMLDivElement>>(new Map());
-  const prevFocusedImageIndexRef = useRef<number>(focusedImageIndex);
 
   // Layout logic
   const itemsToRender: (IndexedImage | ImageStack)[] = (isStackingEnabled && !disableStacking) ? stackedItems : images;
@@ -651,9 +651,50 @@ const ImageGrid: React.FC<ImageGridProps & { width: number; height: number }> = 
     }
   }, [libraryStackContext, rows.length, itemsToRender.length]);
 
-  // Dynamic Scroll Anchoring to keep the viewport stable when row heights change (due to lazy loading / dimension updates)
+  const prevRowsRef = useRef<LayoutRow[]>([]);
+
+  // ── Atomic layout-shift correction ──────────────────────────────────
+  // When row heights change (e.g. lazy-loaded thumbnails reveal real
+  // image dimensions), two things must happen atomically BEFORE the
+  // browser paints:
+  //   1. resetAfterIndex  – clear react-window's stale position cache
+  //   2. scroll anchoring – adjust scrollTop so the visible anchor item
+  //      stays at the same visual position on screen
+  //
+  // flushSync ensures step 1's forceUpdate is processed synchronously
+  // so that when step 2 runs, react-window has already repositioned
+  // every item to its correct geometric location.
   React.useLayoutEffect(() => {
-    if (gridRef.current && resizeAnchorRef.current && pendingRestoreKeyRef.current === null && !pendingRestoreStackScrollRef.current) {
+    // Detect the first row whose height changed
+    let firstChangedIndex = 0;
+    const prevRows = prevRowsRef.current;
+
+    while (firstChangedIndex < Math.min(rows.length, prevRows.length)) {
+      if (rows[firstChangedIndex].height !== prevRows[firstChangedIndex].height) {
+        break;
+      }
+      firstChangedIndex++;
+    }
+
+    prevRowsRef.current = rows;
+    rowsRef.current = rows;
+
+    // Step 1: synchronously invalidate react-window cache so items
+    //         are repositioned with correct style.top values
+    if (listRef.current && firstChangedIndex < prevRows.length) {
+      flushSync(() => {
+        listRef.current!.resetAfterIndex(firstChangedIndex, false);
+      });
+    }
+
+    // Step 2: now that positions are correct, adjust the scroll bar
+    //         so the anchor item stays pixel-perfect on screen
+    if (
+      gridRef.current &&
+      resizeAnchorRef.current &&
+      pendingRestoreKeyRef.current === null &&
+      !pendingRestoreStackScrollRef.current
+    ) {
       let currentY = 0;
       let found = false;
       let foundY = 0;
@@ -674,37 +715,16 @@ const ImageGrid: React.FC<ImageGridProps & { width: number; height: number }> = 
       }
 
       if (found) {
-        const targetScrollTop = Math.round(foundY + (resizeAnchorRef.current.offsetRatio * foundRowHeight));
+        const targetScrollTop = Math.round(
+          foundY + resizeAnchorRef.current.offsetRatio * foundRowHeight,
+        );
         const currentScrollTop = Math.round(gridRef.current.scrollTop);
-        
-        // Synchronously adjust the scroll position to anchor the visually visible item perfectly
+
         if (Math.abs(targetScrollTop - currentScrollTop) > 1) {
           gridRef.current.scrollTop = targetScrollTop;
           scrollStateRef.current.top = targetScrollTop;
         }
       }
-    }
-  }, [rows]);
-
-  const prevRowsRef = useRef<LayoutRow[]>([]);
-  // Update rowsRef for the scroll handler and reset cache smartly
-  useEffect(() => {
-    let firstChangedIndex = 0;
-    const prevRows = prevRowsRef.current;
-    
-    while (firstChangedIndex < Math.min(rows.length, prevRows.length)) {
-      if (rows[firstChangedIndex].height !== prevRows[firstChangedIndex].height) {
-        break;
-      }
-      firstChangedIndex++;
-    }
-
-    prevRowsRef.current = rows;
-    rowsRef.current = rows;
-
-    // Only reset cache if an EXISTING row changed size. Appended rows don't need cache resets.
-    if (listRef.current && firstChangedIndex < prevRows.length) {
-      listRef.current.resetAfterIndex(firstChangedIndex, false);
     }
   }, [rows]);
 
@@ -736,7 +756,7 @@ const ImageGrid: React.FC<ImageGridProps & { width: number; height: number }> = 
         }
 
         if (found) {
-          const newScrollTop = foundY + (resizeAnchorRef.current.offsetRatio * foundRowHeight);
+          const newScrollTop = foundY + resizeAnchorRef.current.offsetRatio * foundRowHeight;
           gridRef.current.scrollTop = newScrollTop;
           scrollStateRef.current.top = newScrollTop;
         }
@@ -1104,51 +1124,39 @@ const ImageGrid: React.FC<ImageGridProps & { width: number; height: number }> = 
              const imageId = isImageStack(nextItem) ? nextItem.coverImage.id : (nextItem as IndexedImage).id;
              useImageStore.setState({ selectedImages: new Set([imageId]) });
           }
+
+          // Scroll the newly focused image into view (keyboard nav only —
+          // clicks never reach this handler, so grid position stays static
+          // when opening an image with the mouse).
+          if (gridRef.current) {
+            let rowOffset = 0;
+            let itemCount = 0;
+            let targetRowHeight = 0;
+            for (let i = 0; i < rows.length; i++) {
+              if (nextIndex < itemCount + rows[i].items.length) {
+                targetRowHeight = rows[i].height;
+                break;
+              }
+              itemCount += rows[i].items.length;
+              rowOffset += rows[i].height + 8;
+            }
+            const scrollTop = gridRef.current.scrollTop;
+            const containerHeight = gridRef.current.clientHeight;
+            if (rowOffset < scrollTop) {
+              gridRef.current.scrollTo({ top: rowOffset, behavior: 'smooth' });
+            } else if (rowOffset + targetRowHeight > scrollTop + containerHeight) {
+              gridRef.current.scrollTo({
+                top: rowOffset + targetRowHeight - containerHeight + 8,
+                behavior: 'smooth',
+              });
+            }
+          }
       }
     };
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [focusedImageIndex, itemsToRender, setFocusedImageIndex, setPreviewImage, onImageClick, rows]);
-
-  // Auto-scroll to focused image
-  useEffect(() => {
-    if (focusedImageIndex !== null && focusedImageIndex !== -1 && gridRef.current) {
-        // Only scroll if the focused image index actually changed
-        if (prevFocusedImageIndexRef.current === focusedImageIndex) {
-            return;
-        }
-        prevFocusedImageIndexRef.current = focusedImageIndex;
-
-        // Find row index and offset
-        let count = 0;
-        let targetRowIndex = 0;
-        let offset = 0;
-        for (let i = 0; i < rows.length; i++) {
-              if (focusedImageIndex < count + rows[i].items.length) {
-                  targetRowIndex = i;
-                  break;
-              }
-              count += rows[i].items.length;
-              offset += rows[i].height + 8; // row height + margin
-        }
-        
-        const rowHeight = rows[targetRowIndex]?.height || 0;
-        const containerHeight = gridRef.current.clientHeight;
-        const scrollTop = gridRef.current.scrollTop;
-
-        // Smart scroll logic
-        if (offset < scrollTop) {
-            gridRef.current.scrollTo({ top: offset, behavior: 'smooth' });
-        } else if (offset + rowHeight > scrollTop + containerHeight) {
-             gridRef.current.scrollTo({ top: offset + rowHeight - containerHeight + 8, behavior: 'smooth' });
-        }
-
-    } else if (focusedImageIndex === -1) {
-        // Reset ref if focus is lost/reset so next focus triggers scroll
-        prevFocusedImageIndexRef.current = -1;
-    }
-  }, [focusedImageIndex, rows]);
 
   // Add global mouseup listener to handle selection end even outside the grid
   useEffect(() => {
@@ -1370,6 +1378,11 @@ const ImageGrid: React.FC<ImageGridProps & { width: number; height: number }> = 
     // No-op
   }, []);
 
+  // Stable itemSize reference so react-window doesn't recalculate layout on every render
+  const itemSize = useCallback((index: number) => {
+    return rows[index] ? rows[index].height + 8 : 0;
+  }, [rows]);
+
   // Ensure all hooks are called consistently before any conditional returns
   const itemData = useMemo<ImageGridRowData>(() => ({
     rows,
@@ -1426,7 +1439,7 @@ const ImageGrid: React.FC<ImageGridProps & { width: number; height: number }> = 
             width={width}
             height={height}
             itemCount={rows.length}
-            itemSize={index => rows[index] ? rows[index].height + 8 : 0}
+            itemSize={itemSize}
             overscanCount={10}
             onScroll={({ scrollOffset }) => {
               handleScroll({ currentTarget: { scrollTop: scrollOffset } } as any);
@@ -1457,7 +1470,7 @@ const ImageGrid: React.FC<ImageGridProps & { width: number; height: number }> = 
         {modalsContent}
     </div>
   );
-}; // End of ImageGrid component
+}); // End of ImageGrid component (React.memo)
 
 
 
