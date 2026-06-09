@@ -2770,6 +2770,17 @@ export const useImageStore = create<ImageState>((set, get) => {
 
             // Prevent concurrent runs (module-level guard — survives state updates)
             if (__syncInProgress) return;
+
+            // Guard: do not process until annotations are loaded from IndexedDB.
+            // Without this, all images appear unanalyzed (annotations is empty),
+            // and we would overwrite existing stack data with fresh assignments.
+            // This also prevents the race where loadAnnotations later overwrites
+            // the in-memory state with stale DB data, discarding our writes.
+            if (!state.isAnnotationsLoaded) {
+                console.log('[Stacks] Annotations not yet loaded — deferring stack sync');
+                return;
+            }
+
             __syncInProgress = true;
 
             try {
@@ -3223,6 +3234,14 @@ export const useImageStore = create<ImageState>((set, get) => {
 
             // Prevent concurrent runs (module-level guard — survives state updates)
             if (__similaritySyncInProgress) return;
+
+            // Guard: do not run before annotations are loaded from IndexedDB.
+            // Prevents the same race described in syncNewImagesToStacks.
+            if (!state.isAnnotationsLoaded) {
+                console.log('[SimilarityGroups] Annotations not yet loaded — deferring');
+                return;
+            }
+
             __similaritySyncInProgress = true;
 
             const reportProgress = (current: number, total: number, message: string) => {
@@ -3251,6 +3270,19 @@ export const useImageStore = create<ImageState>((set, get) => {
                 const newStackGroupIds = new Set<string>();
                 for (const img of images) {
                     const ann = currentAnnotations.get(img.id);
+
+                    // ── Guard: respect intentional unmerging ─────────────────
+                    // When a user manually unmerges an image via
+                    // unmergeSelectedFromStack, stackGroupId is set to undefined
+                    // but isStackAnalyzed remains true. This signals "this image
+                    // was intentionally removed from its stack — do NOT re-assign
+                    // it automatically."  Without this guard, computeSimilarityGroups
+                    // would re-assign the same prompt-hash-based stackGroupId,
+                    // silently undoing the user's manual unmerge.
+                    if (ann?.isStackAnalyzed && !ann?.stackGroupId) {
+                        // Intentionally unstacked — skip this image entirely.
+                        continue;
+                    }
 
                     if (!ann?.stackGroupId) {
                         // Image was never analyzed — assign stackGroupId now

@@ -83,9 +83,9 @@ const TopMenuBar: React.FC<TopMenuBarProps> = ({
                         <button
                             onClick={() => onLibraryViewChange('library')}
                             className={`px-3.5 py-1 text-[13.5px] font-semibold rounded-full transition-all duration-200 ${
-                                activeView === 'library' 
-                                ? 'bg-blue-600 text-white shadow-md shadow-blue-900/20' 
-                                : 'text-gray-400 hover:text-white hover:bg-white/5'
+                                activeView === 'library'
+                                ? 'bg-blue-600 text-white shadow-md shadow-blue-900/20'
+                                : 'text-gray-400 hover:text-gray-200 dark:hover:text-white hover:bg-gray-300/20 dark:hover:bg-white/5'
                             }`}
                         >
                             Library
@@ -96,7 +96,7 @@ const TopMenuBar: React.FC<TopMenuBarProps> = ({
                             className={`px-3.5 py-1 text-[13.5px] font-semibold rounded-full transition-all duration-200 ${
                                 activeView === 'smart'
                                 ? 'bg-purple-600 text-white shadow-md shadow-purple-900/20'
-                                : 'text-gray-400 hover:text-white hover:bg-white/5'
+                                : 'text-gray-400 hover:text-gray-200 dark:hover:text-white hover:bg-gray-300/20 dark:hover:bg-white/5'
                             }`}
                         >
                             Stacks
@@ -105,9 +105,9 @@ const TopMenuBar: React.FC<TopMenuBarProps> = ({
                         <button
                             onClick={() => onLibraryViewChange('model')}
                             className={`px-3.5 py-1 text-[13.5px] font-semibold rounded-full transition-all duration-200 ${
-                                activeView === 'model' 
-                                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-900/20' 
-                                : 'text-gray-400 hover:text-white hover:bg-white/5'
+                                activeView === 'model'
+                                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-900/20'
+                                : 'text-gray-400 hover:text-gray-200 dark:hover:text-white hover:bg-gray-300/20 dark:hover:bg-white/5'
                             }`}
                         >
                             Models

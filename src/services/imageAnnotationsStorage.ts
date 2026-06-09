@@ -40,7 +40,11 @@ export async function loadAllAnnotations(): Promise<Map<string, ImageAnnotations
 
       request.onsuccess = () => {
         const results = request.result as ImageAnnotations[];
-        inMemoryAnnotations.clear();
+        // Merge rather than replace: entries concurrently saved by
+        // bulkSaveAnnotations (which updates inMemoryAnnotations synchronously
+        // before the async DB write) survive even if the DB read started before
+        // their write transaction committed.  The DB is the canonical source,
+        // so its entries overwrite in-memory entries with the same key.
         for (const annotation of results) {
           if (!annotation.autoTags) annotation.autoTags = [];
           if (!annotation.metadataTags) annotation.metadataTags = [];
@@ -67,11 +71,16 @@ export async function saveAnnotation(annotation: ImageAnnotations): Promise<void
   inMemoryAnnotations.set(annotation.imageId, annotation);
 
   if (getIsPersistenceDisabled()) {
+    if (!__persistenceWarningEmitted) {
+      __persistenceWarningEmitted = true;
+      console.error('[Annotations] ⚠️ IndexedDB persistence is DISABLED — stack groups, favorites, and tags will NOT survive a restart.');
+    }
     return;
   }
 
   const db = await openDatabase();
   if (!db) {
+    console.warn('[Annotations] ⚠️ Cannot open database — annotation not persisted.');
     return;
   }
 
@@ -147,17 +156,26 @@ export async function deleteAnnotation(imageId: string): Promise<void> {
 /**
  * Bulk save multiple annotations in a single transaction (for performance)
  */
+let __persistenceWarningEmitted = false;
+
 export async function bulkSaveAnnotations(annotations: ImageAnnotations[]): Promise<void> {
   for (const annotation of annotations) {
     inMemoryAnnotations.set(annotation.imageId, annotation);
   }
 
   if (getIsPersistenceDisabled()) {
+    if (!__persistenceWarningEmitted) {
+      __persistenceWarningEmitted = true;
+      console.error('[Annotations] ⚠️ IndexedDB persistence is DISABLED — stack groups, favorites, and tags will NOT survive a restart. Try clearing the app cache or check for private browsing mode.');
+    }
     return;
   }
 
   const db = await openDatabase();
   if (!db) {
+    // openDatabase already logged the error, but we add context so the user
+    // knows what data is affected.
+    console.warn('[Annotations] ⚠️ Cannot open database — annotations (stacks, favorites, tags) will be lost on restart.');
     return;
   }
 
