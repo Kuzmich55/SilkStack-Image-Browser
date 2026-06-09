@@ -27,12 +27,14 @@ interface SubGroupImageCardProps {
   image: IndexedImage;
   isSelected: boolean;
   onClick: (image: IndexedImage, event: React.MouseEvent) => void;
+  getDragPayload?: (image: IndexedImage) => { sourcePath: string; name: string }[];
 }
 
 const SubGroupImageCard: React.FC<SubGroupImageCardProps> = React.memo(({
   image,
   isSelected,
   onClick,
+  getDragPayload,
 }) => {
   useThumbnail(image);
 
@@ -45,6 +47,9 @@ const SubGroupImageCard: React.FC<SubGroupImageCardProps> = React.memo(({
   const thumbnailsDisabled = useSettingsStore((state) => state.disableThumbnails);
   const toggleFavorite = useImageStore((state) => state.toggleFavorite);
   const toggleImageSelection = useImageStore((state) => state.toggleImageSelection);
+  const setDraggedItems = useImageStore((state) => state.setDraggedItems);
+  const clearDraggedItems = useImageStore((state) => state.clearDraggedItems);
+  const canDragExternally = typeof window !== 'undefined' && !!window.electronAPI?.startFileDrag;
 
   // React to thumbnail becoming ready
   useEffect(() => {
@@ -67,6 +72,64 @@ const SubGroupImageCard: React.FC<SubGroupImageCardProps> = React.memo(({
     toggleImageSelection(image.id);
   };
 
+  const handleDragStart = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!canDragExternally) {
+      return;
+    }
+
+    const directoryPath = image.directoryId;
+    if (!directoryPath) {
+      return;
+    }
+
+    const [, relativeFromId] = image.id.split('::');
+    const relativePath = relativeFromId || image.name;
+
+    // Internal Drag and Drop Data
+    if (getDragPayload && e.dataTransfer) {
+      const payload = getDragPayload(image);
+      e.dataTransfer.setData('application/x-image-metahub-items', JSON.stringify(payload));
+      e.dataTransfer.effectAllowed = 'copyMove';
+
+      // Set global drag state for reliable internal drops
+      setDraggedItems(payload);
+    }
+
+    // Native File Drag (for external apps)
+    e.preventDefault();
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'copyMove';
+    }
+
+    // Get all files to drag
+    let filesToDrag: string[] = [];
+    if (getDragPayload) {
+        const payload = getDragPayload(image);
+        filesToDrag = payload.map(p => p.sourcePath).filter(Boolean);
+    }
+
+    // Fallback to single file if payload empty or failed
+    if (filesToDrag.length === 0) {
+        const directoryPath = image.directoryId;
+        if (!directoryPath) return;
+        const [, relativeFromId] = image.id.split('::');
+        const relativePath = relativeFromId || image.name;
+        filesToDrag = [`${directoryPath}\\${relativePath}`];
+    }
+
+    window.electronAPI?.startFileDrag({
+      files: filesToDrag,
+      directoryPath: image.directoryId,
+      relativePath: (image.id.split('::')[1] || image.name),
+      id: image.id,
+      lastModified: image.lastModified
+    });
+  };
+
+  const handleDragEnd = (_e: React.DragEvent<HTMLDivElement>) => {
+    clearDraggedItems();
+  };
+
   return (
     <div
       className={`relative group flex items-center justify-center bg-gray-800 rounded-lg overflow-hidden cursor-pointer transition-all duration-300 ease-out border border-gray-700/50 ${
@@ -76,6 +139,9 @@ const SubGroupImageCard: React.FC<SubGroupImageCardProps> = React.memo(({
       }`}
       style={{ width: '100%', height: '100%', flexShrink: 0 }}
       onClick={(e) => onClick(image, e)}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+      draggable={canDragExternally}
     >
       {/* Selection checkbox */}
       <button
@@ -147,9 +213,10 @@ interface JustifiedRowProps {
   row: LayoutRow;
   selectedImages: Set<string>;
   onImageClick: (image: IndexedImage, event: React.MouseEvent) => void;
+  getDragPayload?: (image: IndexedImage) => { sourcePath: string; name: string }[];
 }
 
-const JustifiedRow: React.FC<JustifiedRowProps> = React.memo(({ row, selectedImages, onImageClick }) => {
+const JustifiedRow: React.FC<JustifiedRowProps> = React.memo(({ row, selectedImages, onImageClick, getDragPayload }) => {
   return (
     <div className="flex flex-row" style={{ height: row.height, gap: GAP_SIZE }}>
       {row.items.map((item) => {
@@ -163,6 +230,7 @@ const JustifiedRow: React.FC<JustifiedRowProps> = React.memo(({ row, selectedIma
               image={image}
               isSelected={selectedImages.has(image.id)}
               onClick={onImageClick}
+              getDragPayload={getDragPayload}
             />
           </div>
         );
@@ -211,6 +279,45 @@ const SimilarityStackExpandedView: React.FC<SimilarityStackExpandedViewProps> = 
     }
     return map;
   }, [images]);
+
+  // Build drag payload — mirrors ImageGrid's getDragPayload for multi-select drag
+  const getDragPayload = useCallback((targetImage: IndexedImage) => {
+    const storeState = useImageStore.getState();
+    const currentSelectedImages = storeState.selectedImages;
+    const currentImages = storeState.images;
+
+    // If the dragged image is part of the selection, drag all selected images
+    if (currentSelectedImages.has(targetImage.id)) {
+      const selectedItems = currentImages.filter(img => currentSelectedImages.has(img.id));
+
+      if (selectedItems.length > 0) {
+        return selectedItems.map(img => {
+            const [, relativeFromId] = img.id.split('::');
+            const relativePath = relativeFromId || img.name;
+            const sourcePath = img.directoryId
+              ? `${img.directoryId}\\${relativePath}`.replace(/\\\\/g, '\\')
+              : img.id.includes('::') ? img.id.split('::')[1] : img.id;
+
+            return {
+              sourcePath,
+              name: img.name
+            };
+        });
+      }
+    }
+
+    // Fallback: drag just the target image
+    const [, relativeFromId] = targetImage.id.split('::');
+    const relativePath = relativeFromId || targetImage.name;
+    const sourcePath = targetImage.directoryId
+      ? `${targetImage.directoryId}\\${relativePath}`.replace(/\\\\/g, '\\')
+      : targetImage.id.includes('::') ? targetImage.id.split('::')[1] : targetImage.id;
+
+    return [{
+       sourcePath,
+       name: targetImage.name
+    }];
+  }, []);
 
   // Measure available width for justified layout
   const containerRef = useRef<HTMLDivElement>(null);
@@ -306,6 +413,7 @@ const SimilarityStackExpandedView: React.FC<SimilarityStackExpandedViewProps> = 
                         row={row}
                         selectedImages={selectedImages}
                         onImageClick={onImageClick}
+                        getDragPayload={getDragPayload}
                       />
                     </div>
                   ))}
