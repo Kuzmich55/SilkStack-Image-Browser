@@ -1302,6 +1302,9 @@ const ImageGrid: React.FC<ImageGridProps & { width: number; height: number }> = 
   // Handle drill-down
 
   const handleStackClick = React.useCallback((stack: ImageStack) => {
+    // Guard: stack must have images to display.
+    if (stack.images.length === 0) return;
+
     // Save current scroll position of the grid before entering the stack
     if (gridRef.current) {
       moduleMainLibraryScrollPosition = gridRef.current.scrollTop;
@@ -1309,24 +1312,30 @@ const ImageGrid: React.FC<ImageGridProps & { width: number; height: number }> = 
 
     // Build ID-based stack context — filters by explicit image IDs instead of
     // polluting the search bar. This supports future manual image addition.
+    // Use a fallback label when no prompt is available (e.g. manually merged
+    // stacks of images without embedded prompt metadata).
     const prompt = stack.basePrompt
       || stack.coverImage.metadata?.normalizedMetadata?.prompt
-      || stack.coverImage.metadata?.positive_prompt;
-    if (prompt && stack.images.length > 0) {
-        const context: LibraryStackContext = {
-          stackId: stack.id,
-          imageIds: stack.images.map(img => img.id),
-          basePrompt: prompt,
-          // Pass sub-group info for prompt-grouped drill-down display
-          subGroups: stack.subGroups?.map(sg => ({
-            promptHash: sg.promptHash,
-            prompt: sg.prompt,
-            imageIds: sg.imageIds,
-          })),
-        };
-        setLibraryStackContext(context);
-        setStackingEnabled(false); // Disable stacking when drilling down to see individual items
+      || stack.coverImage.metadata?.positive_prompt
+      || 'Untitled stack';
+
+    if (!stack.basePrompt && !stack.coverImage.metadata?.normalizedMetadata?.prompt && !stack.coverImage.metadata?.positive_prompt) {
+      console.log('[Stack] Opening stack without prompt metadata — using fallback label:', stack.id);
     }
+
+    const context: LibraryStackContext = {
+      stackId: stack.id,
+      imageIds: stack.images.map(img => img.id),
+      basePrompt: prompt,
+      // Pass sub-group info for prompt-grouped drill-down display
+      subGroups: stack.subGroups?.map(sg => ({
+        promptHash: sg.promptHash,
+        prompt: sg.prompt,
+        imageIds: sg.imageIds,
+      })),
+    };
+    setLibraryStackContext(context);
+    setStackingEnabled(false); // Disable stacking when drilling down to see individual items
   }, [setLibraryStackContext, setStackingEnabled]);
 
   // Use itemsToRender for calculations
