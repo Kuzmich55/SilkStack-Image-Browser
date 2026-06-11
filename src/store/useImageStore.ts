@@ -514,7 +514,22 @@ export const useImageStore = create<ImageState>((set, get) => {
                 const updated = updates.get(img.id);
                 if (updated) {
                     hasChanges = true;
-                    return updated;
+                    // Preserve annotation-derived fields from the existing image.
+                    // Enrichment merges (metadata parsing results) do not carry
+                    // stackGroupId, similarityGroupId, tags, isFavorite, etc.
+                    // Without this preservation, stacks visually ungroup whenever
+                    // enrichment results overwrite store images during indexing.
+                    return {
+                        ...updated,
+                        isFavorite: img.isFavorite,
+                        tags: img.tags,
+                        autoTags: img.autoTags,
+                        isAutoTagged: img.isAutoTagged,
+                        metadataTags: img.metadataTags,
+                        stackGroupId: img.stackGroupId,
+                        isStackAnalyzed: img.isStackAnalyzed,
+                        similarityGroupId: img.similarityGroupId,
+                    };
                 }
                 return img;
             });
@@ -567,7 +582,26 @@ export const useImageStore = create<ImageState>((set, get) => {
                         availableAspectRatios: Array.from(aspectRatios),
                     };
                 } else {
-                    nextFilteredImages = state.filteredImages.map(img => updates.get(img.id) ?? img);
+                    nextFilteredImages = state.filteredImages.map(img => {
+                        const updated = updates.get(img.id);
+                        if (updated) {
+                            // Same annotation-field preservation as the `merged`
+                            // array above — prevents temporary ungrouping during
+                            // the window before scheduleFilterRecompute fires.
+                            return {
+                                ...updated,
+                                isFavorite: img.isFavorite,
+                                tags: img.tags,
+                                autoTags: img.autoTags,
+                                isAutoTagged: img.isAutoTagged,
+                                metadataTags: img.metadataTags,
+                                stackGroupId: img.stackGroupId,
+                                isStackAnalyzed: img.isStackAnalyzed,
+                                similarityGroupId: img.similarityGroupId,
+                            };
+                        }
+                        return img;
+                    });
                     scheduleFilterRecompute();
                 }
 
