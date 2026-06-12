@@ -858,6 +858,22 @@ export function useImageLoader() {
           shouldScanSubfolders,
         );
 
+        // Safeguard: if the directory listing came back empty but the cache
+        // has previously indexed this directory, the drive may be temporarily
+        // inaccessible (network reconnect, disk spin-up).  Bail out without
+        // deleting any images — the 5 s polling loop will retry later.
+        if (allCurrentFiles.length === 0) {
+          const cached = await cacheManager.getCachedData(directory.path, shouldScanSubfolders);
+          if (cached && cached.imageCount > 0) {
+            console.warn(`[loadDirectory] Directory ${directory.name} returned 0 files but cache has ${cached.imageCount} — drive may be disconnected, skipping sync`);
+            if (suppressIndexingState) {
+              setDirectoryRefreshing(directory.id, false);
+              setProgress(null);
+            }
+            return;
+          }
+        }
+
         // If we scanned a subfolder, we need to adjust the file paths to be relative to the ROOT directory
         // because the cache expects paths relative to directory.path, not scanPath
         let relativePrefix = "";
@@ -1333,18 +1349,15 @@ export function useImageLoader() {
               `Loaded ${directoriesToLoad.length} ${directoriesText} from cache.`,
             );
 
-            // Perform a background sync to check for new/deleted files
+            // Perform a background sync to check for new/deleted files.
+            // Always attempt the sync even if isConnected was false — the
+            // fs.access check is a point-in-time snapshot; the drive may
+            // have become available since.  loadDirectory has its own
+            // comprehensive error handling.
             for (const dir of directoriesToLoad) {
-              if (dir.isConnected !== false) {
-                // Skip permission update here as we already did it globally above
-                loadDirectory(dir, true, undefined, true).catch((e) => {
-                  console.warn(`Background sync failed for ${dir.name}:`, e);
-                });
-              } else {
-                console.log(
-                  `Skipping background sync for disconnected directory: ${dir.name}`,
-                );
-              }
+              loadDirectory(dir, true, undefined, true).catch((e) => {
+                console.warn(`Background sync failed for ${dir.name}:`, e);
+              });
             }
           };
 

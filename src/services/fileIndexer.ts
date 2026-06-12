@@ -2030,11 +2030,18 @@ export async function processFiles(
 
   if (cacheWriter) {
     const finalizeStart = performance.now();
-    // Fire-and-forget: do NOT block processFiles return on cache finalize.
-    // The writeQueue inside finalize() waits for all chunk IPC writes, and
-    // any single stalled IPC call would hang the progress bar permanently.
-    // The cache will self-heal on next load if this write fails.
-    cacheWriter.finalize().then(() => {
+    // Await finalize with a timeout — ensures the cache is usually consistent
+    // (new images persisted) while never blocking the progress bar indefinitely.
+    // On the rare occasion the IPC hangs, we time out after 15 s; the cache
+    // will self-heal on the next load via validateCacheAndGetDiff.
+    const CACHE_FINALIZE_TIMEOUT_MS = 15_000;
+    try {
+      await Promise.race([
+        cacheWriter.finalize(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Cache finalize timed out')), CACHE_FINALIZE_TIMEOUT_MS)
+        ),
+      ]);
       const finalizeDuration = performance.now() - finalizeStart;
       const bytesWritten = JSON.stringify({
         id: `${directoryId}-${scanSubfolders ? 'recursive' : 'flat'}`,
@@ -2044,9 +2051,9 @@ export async function processFiles(
       phaseAStats.diskWrites += 1;
       phaseAStats.ipcCalls += 1;
       performance.mark('indexing:phaseA:finalize', { detail: { durationMs: finalizeDuration, bytesWritten } });
-    }).catch(err => {
-      console.warn('[indexing] Cache finalize failed (will self-heal on next load):', err);
-    });
+    } catch (err) {
+      console.warn('[indexing] Cache finalize failed or timed out (cache will self-heal on next load):', err?.message || err);
+    }
   }
 
   performance.mark('indexing:phaseA:complete', {
