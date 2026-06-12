@@ -64,7 +64,7 @@ const Footer: React.FC<FooterProps> = ({
 }) => {
   const enableSafeMode = useSettingsStore((state) => state.enableSafeMode);
   const setEnableSafeMode = useSettingsStore((state) => state.setEnableSafeMode);
-  const isStackingEnabled = useImageStore((state) => state.isStackingEnabled);
+  const isStackingEnabled = useSettingsStore((state) => state.isStackingEnabled);
   const setStackingEnabled = useImageStore((state) => state.setStackingEnabled);
   const indexingProgress = useImageStore((state) => state.progress);
 

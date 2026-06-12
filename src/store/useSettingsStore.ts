@@ -150,7 +150,7 @@ export const useSettingsStore = create<SettingsState>()(
       comfyUILastConnectionStatus: 'unknown',
 
       isSidebarCollapsed: true,
-      isStackingEnabled: false,
+      isStackingEnabled: true,
 
       // Actions
       setSortOrder: (order) => set({ sortOrder: order }),
@@ -275,7 +275,14 @@ export const useSettingsStore = create<SettingsState>()(
         }
 
         if (state && typeof state.isStackingEnabled !== 'boolean') {
-          state.isStackingEnabled = false;
+          // Fall back to localStorage (synchronous backup), then default to true.
+          // Stacking should be ON by default — it's the primary library view mode.
+          try {
+            const backup = localStorage.getItem('silkstack-stacking-enabled');
+            state.isStackingEnabled = backup !== null ? backup === 'true' : true;
+          } catch {
+            state.isStackingEnabled = true;
+          }
         }
       },
     }

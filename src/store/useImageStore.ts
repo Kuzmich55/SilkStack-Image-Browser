@@ -1159,7 +1159,7 @@ export const useImageStore = create<ImageState>((set, get) => {
         previewImage: null,
         selectedImages: new Set(),
         focusedImageIndex: null,
-        isStackingEnabled: false,
+        isStackingEnabled: true,
         undoAvailable: false,
         searchQuery: '',
         availableModels: [],
@@ -2790,7 +2790,11 @@ export const useImageStore = create<ImageState>((set, get) => {
             // Without ai-intelligence, stacking cannot be enabled
             if (enabled && !import.meta.env.VITE_AI_FEATURES_AVAILABLE) return;
             set({ isStackingEnabled: enabled });
-            // Persist to settings
+            // Persist synchronously via localStorage as a backup so the setting
+            // survives even when the Electron IPC saveSettings call is delayed
+            // or skipped (e.g. during rehydration window, or IPC congestion).
+            try { localStorage.setItem('silkstack-stacking-enabled', String(enabled)); } catch {}
+            // Also persist to the settings store (async, via Electron IPC)
             useSettingsStore.getState().setStackingEnabled(enabled);
         },
 

@@ -551,7 +551,9 @@ const ImageGrid: React.FC<ImageGridProps & { width: number; height: number }> = 
   const scrollStateRef = useRef({ key: scrollKey, top: 0 });
 
   // --- Stacking Logic (Must be top-level) ---
-  const isStackingEnabled = useImageStore((state) => state.isStackingEnabled);
+  // Read isStackingEnabled from the settings store (source of truth, persisted)
+  // rather than the image store to avoid desync on app reload.
+  const isStackingEnabled = useSettingsStore((state) => state.isStackingEnabled);
   const setStackingEnabled = useImageStore((state) => state.setStackingEnabled);
   const setLibraryStackContext = useImageStore((state) => state.setLibraryStackContext);
   const libraryStackContext = useImageStore((state) => state.libraryStackContext);

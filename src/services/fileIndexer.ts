@@ -2030,16 +2030,23 @@ export async function processFiles(
 
   if (cacheWriter) {
     const finalizeStart = performance.now();
-    await cacheWriter.finalize();
-    const finalizeDuration = performance.now() - finalizeStart;
-    const bytesWritten = JSON.stringify({
-      id: `${directoryId}-${scanSubfolders ? 'recursive' : 'flat'}`,
-      imageCount: totalPhaseAFiles,
-    }).length;
-    phaseAStats.bytesWritten += bytesWritten;
-    phaseAStats.diskWrites += 1;
-    phaseAStats.ipcCalls += 1;
-    performance.mark('indexing:phaseA:finalize', { detail: { durationMs: finalizeDuration, bytesWritten } });
+    // Fire-and-forget: do NOT block processFiles return on cache finalize.
+    // The writeQueue inside finalize() waits for all chunk IPC writes, and
+    // any single stalled IPC call would hang the progress bar permanently.
+    // The cache will self-heal on next load if this write fails.
+    cacheWriter.finalize().then(() => {
+      const finalizeDuration = performance.now() - finalizeStart;
+      const bytesWritten = JSON.stringify({
+        id: `${directoryId}-${scanSubfolders ? 'recursive' : 'flat'}`,
+        imageCount: totalPhaseAFiles,
+      }).length;
+      phaseAStats.bytesWritten += bytesWritten;
+      phaseAStats.diskWrites += 1;
+      phaseAStats.ipcCalls += 1;
+      performance.mark('indexing:phaseA:finalize', { detail: { durationMs: finalizeDuration, bytesWritten } });
+    }).catch(err => {
+      console.warn('[indexing] Cache finalize failed (will self-heal on next load):', err);
+    });
   }
 
   performance.mark('indexing:phaseA:complete', {
