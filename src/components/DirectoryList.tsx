@@ -9,8 +9,8 @@ import {
   Folder,
   FolderTree,
   X,
-  EyeOff,
   Smile,
+  Settings,
 } from "lucide-react";
 import { normalizePath } from "../utils/pathUtils";
 import { EMOJI_CATEGORIES } from "../utils/emojiData";
@@ -29,7 +29,7 @@ interface DirectoryListProps {
   isIndexing?: boolean;
   scanSubfolders?: boolean;
   excludedFolders?: Set<string>;
-  onExcludeFolder?: (path: string) => void;
+  onManageFolders?: () => void;
   isCollapsed?: boolean;
 }
 
@@ -72,7 +72,7 @@ export default function DirectoryList({
   isIndexing = false,
   scanSubfolders = false,
   excludedFolders,
-  onExcludeFolder,
+  onManageFolders,
   isCollapsed = false,
 }: DirectoryListProps) {
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
@@ -715,16 +715,16 @@ export default function DirectoryList({
           Refresh Folder
         </button>
 
-        {onExcludeFolder && (
+        {onManageFolders && (
           <button
             className="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2"
             onClick={() => {
-              onExcludeFolder(normalizePath(contextMenu.path));
+              onManageFolders();
               setContextMenu(null);
             }}
           >
-            <EyeOff className="w-4 h-4" />
-            Exclude Folder
+            <Settings className="w-4 h-4" />
+            Manage Folders
           </button>
         )}
       </div>

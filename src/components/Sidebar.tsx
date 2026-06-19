@@ -28,7 +28,7 @@ interface SidebarProps {
   isIndexing: boolean;
   scanSubfolders: boolean;
   excludedFolders: Set<string>;
-  onExcludeFolder: (path: string) => void;
+  onManageFolders: () => void;
   sortOrder: string;
   onSortOrderChange: (value: string) => void;
   onReshuffle?: () => void;
@@ -56,7 +56,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   isIndexing = false,
   scanSubfolders,
   excludedFolders,
-  onExcludeFolder,
+  onManageFolders,
   sortOrder,
   onSortOrderChange,
   onReshuffle
@@ -180,7 +180,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               isIndexing,
               scanSubfolders,
               excludedFolders,
-              onExcludeFolder,
+              onManageFolders,
               isCollapsed: true,
             })
           ) : null}
@@ -271,7 +271,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             isIndexing,
             scanSubfolders,
             excludedFolders,
-            onExcludeFolder
+            onManageFolders
           })
         ) : (
           children

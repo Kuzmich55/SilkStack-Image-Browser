@@ -71,7 +71,6 @@ export default function App() {
   const searchQuery = useImageStore((state) => state.searchQuery);
   const scanSubfolders = useImageStore((state) => state.scanSubfolders);
   const excludedFolders = useImageStore((state) => state.excludedFolders);
-  const addExcludedFolder = useImageStore((state) => state.addExcludedFolder);
   const availableModels = useImageStore((state) => state.availableModels);
   const availableLoras = useImageStore((state) => state.availableLoras);
   const availableSchedulers = useImageStore((state) => state.availableSchedulers);
@@ -165,7 +164,7 @@ export default function App() {
   // --- Local UI State ---
   const previousSearchQueryRef = useRef(searchQuery);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<'general' | 'hotkeys' | 'about'>('general');
+  const [settingsTab, setSettingsTab] = useState<'general' | 'folders' | 'hotkeys' | 'about'>('general');
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isHotkeyHelpOpen, setIsHotkeyHelpOpen] = useState(false);
   const [newImagesToast, setNewImagesToast] = useState<{ count: number; directoryName: string } | null>(null);
@@ -182,9 +181,13 @@ export default function App() {
 
 
 
-  const handleOpenSettings = (tab: 'general' | 'hotkeys' | 'about' = 'general') => {
+  const handleOpenSettings = (tab: 'general' | 'folders' | 'hotkeys' | 'about' = 'general') => {
     setSettingsTab(tab);
     setIsSettingsModalOpen(true);
+  };
+
+  const handleManageFolders = () => {
+    handleOpenSettings('folders');
   };
 
   const handleOpenHotkeySettings = () => {
@@ -927,7 +930,7 @@ export default function App() {
             isIndexing={indexingState === 'indexing' || indexingState === 'completed'}
             scanSubfolders={scanSubfolders}
             excludedFolders={excludedFolders}
-            onExcludeFolder={addExcludedFolder}
+            onManageFolders={handleManageFolders}
             sortOrder={sortOrder}
             onSortOrderChange={imageStoreSetSortOrder}
             onReshuffle={reshuffle}
