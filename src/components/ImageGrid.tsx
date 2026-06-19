@@ -496,7 +496,7 @@ const ImageGridRowComponent = React.memo(({ index, style, data }: ListChildCompo
                                   getDragPayload={getDragPayload}
                               />
                               <div onClick={(e) => { e.stopPropagation(); handleStackClick(item); }} className="absolute top-2 right-10 bg-black/60 text-white text-[11px] font-medium px-2 py-0.5 rounded-md backdrop-blur-md z-20 border border-white/10 shadow-sm cursor-pointer hover:bg-black/80">+{item.count}</div>
-                              <div onClick={(e) => { e.stopPropagation(); handleStackClick(item); }} className="absolute bottom-2 left-2 bg-black/60 text-white text-[10px] font-mono px-1.5 py-0.5 rounded backdrop-blur-sm z-20 cursor-pointer hover:bg-black/80">Stack</div>
+                              <div onClick={(e) => { e.stopPropagation(); handleStackClick(item); }} className="absolute bottom-2 right-2 bg-black/60 text-white text-[10px] font-mono px-1.5 py-0.5 rounded backdrop-blur-sm z-20 cursor-pointer hover:bg-black/80">Stack</div>
                           </div>
                         </div>
                     );
