@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect, useMemo, useCallback } from 'react';
-import { ArrowLeft, Star, Square, CheckSquare } from 'lucide-react';
+import { ArrowLeft, Star, Square, CheckSquare, X } from 'lucide-react';
 import { IndexedImage } from '../types';
 import { useThumbnail } from '../hooks/useThumbnail';
 import { useSettingsStore } from '../store/useSettingsStore';
@@ -360,11 +360,21 @@ const SimilarityStackExpandedView: React.FC<SimilarityStackExpandedViewProps> = 
           <ArrowLeft size={14} />
           <span>Library</span>
         </button>
-        <div className="text-xs text-gray-400">
-          {images.length} {images.length === 1 ? 'image' : 'images'}
-          {subGroups.length > 1 && (
-            <span> · {subGroups.length} prompt variations</span>
-          )}
+        <div className="flex items-center gap-3">
+          <div className="text-xs text-gray-400">
+            {images.length} {images.length === 1 ? 'image' : 'images'}
+            {subGroups.length > 1 && (
+              <span> · {subGroups.length} prompt variations</span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onBack}
+            className="flex items-center justify-center w-7 h-7 rounded-md text-gray-400 hover:text-white hover:bg-gray-700/60 transition-all"
+            title="Close stack"
+          >
+            <X size={16} />
+          </button>
         </div>
       </div>
 
