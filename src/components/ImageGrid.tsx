@@ -476,7 +476,7 @@ const ImageGridRowComponent = React.memo(({ index, style, data }: ListChildCompo
                           key={item.id} 
                           className="relative group cursor-pointer" 
                           style={{ width: itemWidth, height: row.height, flexShrink: 0 }}
-                          onClick={() => handleStackClick(item)}
+                          onClick={(e) => onImageClick(item.coverImage, e)}
                       >
                           {/* ... stack layers ... */}
                           <div className="absolute top-[-4px] left-[4px] right-[-4px] bottom-[4px] bg-gray-700 rounded-lg border border-gray-600 shadow-sm z-0"></div>
@@ -484,7 +484,7 @@ const ImageGridRowComponent = React.memo(({ index, style, data }: ListChildCompo
                           <div className="relative z-10 w-full h-full">
                               <ImageCard
                                   image={item.coverImage}
-                                  onImageClick={(img, e) => { e.stopPropagation(); handleStackClick(item); }}
+                                  onImageClick={(img, e) => { e.stopPropagation(); onImageClick(img, e); }}
                                   isSelected={selectedImages.has(item.coverImage.id)}
                                   isFocused={focusedItemId === item.coverImage.id}
                                   onImageLoad={handleImageLoad}
@@ -495,8 +495,8 @@ const ImageGridRowComponent = React.memo(({ index, style, data }: ListChildCompo
                                   isBlurred={isSensitive && enableSafeMode && blurSensitiveImages}
                                   getDragPayload={getDragPayload}
                               />
-                              <div className="absolute top-2 right-10 bg-black/60 text-white text-[11px] font-medium px-2 py-0.5 rounded-md backdrop-blur-md z-20 border border-white/10 shadow-sm">+{item.count}</div>
-                              <div className="absolute bottom-2 left-2 bg-black/60 text-white text-[10px] font-mono px-1.5 py-0.5 rounded backdrop-blur-sm z-20 pointer-events-none">Stack</div>
+                              <div onClick={(e) => { e.stopPropagation(); handleStackClick(item); }} className="absolute top-2 right-10 bg-black/60 text-white text-[11px] font-medium px-2 py-0.5 rounded-md backdrop-blur-md z-20 border border-white/10 shadow-sm cursor-pointer hover:bg-black/80">+{item.count}</div>
+                              <div onClick={(e) => { e.stopPropagation(); handleStackClick(item); }} className="absolute bottom-2 left-2 bg-black/60 text-white text-[10px] font-mono px-1.5 py-0.5 rounded backdrop-blur-sm z-20 cursor-pointer hover:bg-black/80">Stack</div>
                           </div>
                         </div>
                     );
