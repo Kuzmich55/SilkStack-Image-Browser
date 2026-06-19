@@ -35,10 +35,22 @@ const compareByNameAsc = (x: IndexedImage, y: IndexedImage) => {
   return c !== 0 ? c : compareById(x, y);
 };
 
+// Simple string hash function (mirrors filterAndSort in useImageStore)
+const stringHash = (str: string) => {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  return hash;
+};
+
 const sortItems = (
   items: StackItem[],
   sortOrder: 'asc' | 'desc' | 'date-asc' | 'date-desc' | 'random',
-  displayStarredFirst: boolean
+  displayStarredFirst: boolean,
+  randomSeed?: number
 ): StackItem[] => {
   return [...items].sort((a, b) => {
     const imgA = getRepImage(a);
@@ -60,9 +72,18 @@ const sortItems = (
       const c = (imgA.lastModified || 0) - (imgB.lastModified || 0);
       return c !== 0 ? c : compareByNameAsc(imgA, imgB);
     }
-    // Default: date-desc
-    const c = (imgB.lastModified || 0) - (imgA.lastModified || 0);
-    return c !== 0 ? c : compareByNameAsc(imgA, imgB);
+    if (sortOrder === 'date-desc') {
+      const c = (imgB.lastModified || 0) - (imgA.lastModified || 0);
+      return c !== 0 ? c : compareByNameAsc(imgA, imgB);
+    }
+    if (sortOrder === 'random') {
+      const seed = randomSeed || 0;
+      const hashA = stringHash(imgA.id + seed.toString());
+      const hashB = stringHash(imgB.id + seed.toString());
+      if (hashA !== hashB) return hashA - hashB;
+      return compareById(imgA, imgB);
+    }
+    return compareById(imgA, imgB);
   });
 };
 
@@ -170,6 +191,7 @@ export const useImageStacking = (
   isEnabled: boolean
 ): UseImageStackingResult => {
   const sortOrder = useImageStore((state) => state.sortOrder);
+  const randomSeed = useImageStore((state) => state.randomSeed);
   const displayStarredFirst = useSettingsStore((state) => state.displayStarredFirst);
 
   const stackedItems = useMemo(() => {
@@ -187,8 +209,8 @@ export const useImageStacking = (
       ? groupByAnnotation(images)
       : images;
 
-    return sortItems(items, sortOrder, displayStarredFirst);
-  }, [images, isEnabled, sortOrder, displayStarredFirst]);
+    return sortItems(items, sortOrder, displayStarredFirst, randomSeed);
+  }, [images, isEnabled, sortOrder, displayStarredFirst, randomSeed]);
 
   return {
     stackedItems,
