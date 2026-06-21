@@ -1568,7 +1568,23 @@ export const useImageStore = create<ImageState>((set, get) => {
             flushPendingMerges();
             set(state => {
                 const updates = new Map(updatedImages.map(img => [img.id, img]));
-                const merged = state.images.map(img => updates.get(img.id) ?? img);
+                const merged = state.images.map(img => {
+                    const updated = updates.get(img.id);
+                    if (updated) {
+                        return {
+                            ...updated,
+                            isFavorite: img.isFavorite,
+                            tags: img.tags,
+                            autoTags: img.autoTags,
+                            isAutoTagged: img.isAutoTagged,
+                            metadataTags: img.metadataTags,
+                            stackGroupId: img.stackGroupId,
+                            isStackAnalyzed: img.isStackAnalyzed,
+                            similarityGroupId: img.similarityGroupId,
+                        };
+                    }
+                    return img;
+                });
                 return _updateState(state, merged);
             });
         },
@@ -2858,6 +2874,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                         isAutoTagged: existing?.isAutoTagged,
                         // New stack fields
                         stackGroupId,
+                        similarityGroupId: existing?.similarityGroupId,
                         isStackAnalyzed: true,
                         addedAt: existing?.addedAt ?? now,
                         updatedAt: now,
@@ -3339,13 +3356,18 @@ export const useImageStore = create<ImageState>((set, get) => {
                             metadataTags: ann?.metadataTags ?? [],
                             isAutoTagged: ann?.isAutoTagged,
                             stackGroupId,
+                            similarityGroupId: ann?.similarityGroupId,
                             isStackAnalyzed: true,
                             addedAt: ann?.addedAt ?? Date.now(),
                             updatedAt: Date.now(),
                         };
                         missingStackIds.push(updated);
                         currentAnnotations.set(img.id, updated);
-                        if (stackGroupId) newStackGroupIds.add(stackGroupId);
+                        if (stackGroupId) {
+                            if (!ann?.similarityGroupId) {
+                                newStackGroupIds.add(stackGroupId);
+                            }
+                        }
                     } else if (ann.stackGroupId && !ann.similarityGroupId) {
                         // Image has exact-match group but was never similarity-merged.
                         // This happens when syncNewImagesToStacks already ran and
@@ -3358,6 +3380,19 @@ export const useImageStore = create<ImageState>((set, get) => {
                 if (missingStackIds.length > 0) {
                     console.log(`[SimilarityGroups] Assigned stackGroupId to ${missingStackIds.length} images that were missing it`);
                     await bulkSaveAnnotations(missingStackIds);
+
+                    const currentImages = get().images;
+                    const currentState = get();
+                    const imagesWithAnnotations = applyAnnotationsToImages(currentImages, currentAnnotations);
+                    const filteredResult = filterAndSort({ ...currentState, images: imagesWithAnnotations, annotations: currentAnnotations });
+                    const availableFilters = recalculateAvailableFilters(filteredResult.filteredImages);
+
+                    set({
+                        ...filteredResult,
+                        ...availableFilters,
+                        images: imagesWithAnnotations,
+                        annotations: currentAnnotations,
+                    });
                 }
 
                 if (newStackGroupIds.size === 0) {
