@@ -6,4 +6,7 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
   },
+  define: {
+    'import.meta.env.VITE_AI_FEATURES_AVAILABLE': JSON.stringify('true'),
+  },
 });

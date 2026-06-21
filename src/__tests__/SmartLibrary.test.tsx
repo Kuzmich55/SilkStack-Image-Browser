@@ -12,10 +12,35 @@ vi.hoisted(() => {
 });
 
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import Stacks from '../components/SmartLibrary';
 import { useImageStore } from '../store/useImageStore';
 import { useSettingsStore } from '../store/useSettingsStore';
+
+// Mock the ai-intelligence package — provides stub components that mirror
+// the originals' DOM output for integration tests of the wrapper layer.
+// These are loaded via React.lazy, so the test must use waitFor/findBy*
+// to allow the Suspense boundary to resolve.
+vi.mock('@ai-images-browser/ai-intelligence', () => {
+  const MockStackCard = ({ stack, onOpen }: any) => (
+    <button onClick={onOpen} type="button">
+      <span>{stack.count} images</span>
+    </button>
+  );
+  const MockSimilarityStackExpandedView = ({ onBack, images, subGroups }: any) => (
+    <div>
+      <button onClick={onBack} type="button">
+        Library
+      </button>
+      <span>{images.length} images</span>
+      <span>{subGroups.length} prompt variations</span>
+    </div>
+  );
+  return {
+    StackCard: MockStackCard,
+    SimilarityStackExpandedView: MockSimilarityStackExpandedView,
+  };
+});
 
 // Mock Lucide icons using the original module to preserve all standard icon exports
 vi.mock('lucide-react', async (importOriginal) => {
@@ -55,12 +80,14 @@ describe('Stacks Scroll Position and DOM Preservation', () => {
     expect(gridContainer).not.toBeNull();
     expect(gridContainer.className).toBe('flex-1 min-h-0 overflow-y-auto');
 
-    // Click on stack card open button to expand it
-    const openBtn = screen.getByText(/images/i);
+    // Wait for React.lazy Suspense to resolve, then click the stack card button.
+    // findByText uses waitFor under the hood and retries until the element appears.
+    const openBtn = await screen.findByText(/images/i);
     fireEvent.click(openBtn);
 
     // Expanded view should be rendered (SimilarityStackExpandedView shows "Library" back button)
-    expect(screen.getByText(/Library/i)).toBeDefined();
+    const libraryBtn = await screen.findByText(/Library/i);
+    expect(libraryBtn).toBeDefined();
 
     // Grid content is replaced by drill-down view (scroll position saved in refs,
     // restored via useEffect when closing). Footer remains visible below.

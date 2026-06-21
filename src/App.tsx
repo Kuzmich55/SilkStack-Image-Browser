@@ -28,7 +28,7 @@ import GridToolbar from './components/GridToolbar';
 import TopMenuBar from './components/TopMenuBar';
 
 import ImageTable from './components/ImageTable';
-import SimilarityStackExpandedView from './components/SimilarityStackExpandedView';
+import SimilarityStackExpandedView from './components/SimilarityStackExpandedViewWrapper';
 
 import { normalizePath } from './utils/pathUtils';
 

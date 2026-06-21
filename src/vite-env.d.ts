@@ -59,4 +59,90 @@ declare module '@ai-images-browser/ai-intelligence' {
       onProgress?: (current: number, total: number, message: string) => void;
     }): Promise<{ groupIdToSimId: Map<string, string> }>;
   }
+
+  // ── Stacking types ─────────────────────────────────────────────────
+
+  export interface StackImage {
+    id: string;
+    name: string;
+    handle?: unknown;
+    thumbnailUrl?: string;
+    thumbnailStatus?: string;
+    thumbnailError?: string | null;
+    metadata?: Record<string, unknown>;
+    lastModified?: number;
+    dimensions?: string;
+    directoryId?: string;
+    fileType?: string;
+    isFavorite?: boolean;
+    prompt?: string;
+    stackGroupId?: string;
+    isStackAnalyzed?: boolean;
+    similarityGroupId?: string;
+    [key: string]: any; // allow extra fields
+  }
+
+  export interface StackSubGroup {
+    promptHash: string;
+    prompt: string;
+    imageIds: string[];
+    coverImageId: string;
+    size: number;
+  }
+
+  export interface ImageStack {
+    id: string;
+    coverImage: StackImage;
+    images: StackImage[];
+    count: number;
+    subGroups?: StackSubGroup[];
+    basePrompt?: string;
+  }
+
+  // ── Layout utilities ───────────────────────────────────────────────
+
+  export interface LayoutRow {
+    items: (StackImage | ImageStack)[];
+    height: number;
+    width: number;
+  }
+
+  export function getItemAspectRatio(item: StackImage | ImageStack): number;
+  export function computeJustifiedLayout(
+    items: (StackImage | ImageStack)[],
+    containerWidth: number,
+    targetRowHeight: number,
+    gap?: number,
+  ): LayoutRow[];
+
+  // ── useImageStacking hook ───────────────────────────────────────────
+
+  export function useImageStacking(
+    images: StackImage[],
+    isEnabled: boolean,
+    sortOrder: 'asc' | 'desc' | 'date-asc' | 'date-desc' | 'random',
+    displayStarredFirst: boolean,
+    randomSeed: number,
+  ): { stackedItems: (StackImage | ImageStack)[]; isStackingEnabled: boolean };
+
+  // ── React components ────────────────────────────────────────────────
+
+  export const StackCard: React.FC<{
+    stack: ImageStack;
+    onOpen: () => void;
+  }>;
+
+  export const SimilarityStackExpandedView: React.FC<{
+    images: StackImage[];
+    subGroups: { promptHash: string; prompt: string; imageIds: string[] }[];
+    onImageClick: (image: StackImage, event: React.MouseEvent) => void;
+    selectedImages: Set<string>;
+    onBack: () => void;
+    imageSize?: number;
+    thumbnailsDisabled: boolean;
+    onToggleFavorite: (imageId: string) => void;
+    onToggleSelection: (imageId: string) => void;
+    onDragStart: (image: StackImage, event: React.DragEvent<HTMLDivElement>) => void;
+    onDragEnd: (event: React.DragEvent<HTMLDivElement>) => void;
+  }>;
 }

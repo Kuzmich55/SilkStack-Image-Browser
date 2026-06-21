@@ -4,8 +4,8 @@ import { useImageStore } from '../store/useImageStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useImageStacking } from '../hooks/useImageStacking';
 import { ImageStack, IndexedImage, LibraryStackContext } from '../types';
-import StackCard from './StackCard';
-import SimilarityStackExpandedView from './SimilarityStackExpandedView';
+import StackCard from './StackCardWrapper';
+import SimilarityStackExpandedView from './SimilarityStackExpandedViewWrapper';
 import Footer from './Footer';
 
 interface StacksProps {}

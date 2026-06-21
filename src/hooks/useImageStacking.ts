@@ -28,6 +28,16 @@ type StackItem = IndexedImage | ImageStack;
 const getRepImage = (item: StackItem): IndexedImage =>
   'coverImage' in item ? item.coverImage : item;
 
+/** Check if an item (stack or single image) has any favorited images. */
+const isItemStarred = (item: StackItem): boolean => {
+  if ('coverImage' in item) {
+    // ImageStack: check all images in the stack, not just the cover
+    return item.images.some(img => img.isFavorite);
+  }
+  // IndexedImage
+  return item.isFavorite || false;
+};
+
 const compareById = (x: IndexedImage, y: IndexedImage) => x.id.localeCompare(y.id);
 
 const compareByNameAsc = (x: IndexedImage, y: IndexedImage) => {
@@ -57,8 +67,8 @@ const sortItems = (
     const imgB = getRepImage(b);
 
     if (displayStarredFirst) {
-      const favA = imgA.isFavorite || false;
-      const favB = imgB.isFavorite || false;
+      const favA = isItemStarred(a);
+      const favB = isItemStarred(b);
       if (favA && !favB) return -1;
       if (!favA && favB) return 1;
     }
@@ -99,7 +109,7 @@ function resolvePrompt(image: IndexedImage): string {
 // ── Sub-group construction ─────────────────────────────────────────────
 
 /** Build sub-groups within a set of images by exact prompt text. */
-function buildSubGroups(images: IndexedImage[]): StackSubGroup[] {
+function buildSubGroups(images: IndexedImage[], displayStarredFirst: boolean): StackSubGroup[] {
   const byPrompt = new Map<string, IndexedImage[]>();
 
   for (const img of images) {
@@ -113,11 +123,20 @@ function buildSubGroups(images: IndexedImage[]): StackSubGroup[] {
     }
   }
 
+  // Build a set of starred image IDs for fast lookup in sub-group sorting
+  const starredIds = new Set(images.filter(img => img.isFavorite).map(img => img.id));
+
   const subGroups: StackSubGroup[] = [];
   for (const [, sgImages] of byPrompt) {
-    const sorted = [...sgImages].sort(
-      (a, b) => (b.lastModified || 0) - (a.lastModified || 0)
-    );
+    const sorted = [...sgImages].sort((a, b) => {
+      // Starred images first within each sub-group
+      if (displayStarredFirst) {
+        if (a.isFavorite && !b.isFavorite) return -1;
+        if (!a.isFavorite && b.isFavorite) return 1;
+      }
+      // Then by lastModified descending
+      return (b.lastModified || 0) - (a.lastModified || 0);
+    });
     const prompt = resolvePrompt(sorted[0]);
     subGroups.push({
       promptHash: simpleHash(prompt),
@@ -128,8 +147,16 @@ function buildSubGroups(images: IndexedImage[]): StackSubGroup[] {
     });
   }
 
-  // Sort sub-groups by size (largest first), then alphabetically
-  subGroups.sort((a, b) => b.size - a.size || a.prompt.localeCompare(b.prompt));
+  // Sort sub-groups: starred-containing first, then by size (largest first), then alphabetically
+  subGroups.sort((a, b) => {
+    if (displayStarredFirst) {
+      const starA = a.imageIds.some(id => starredIds.has(id));
+      const starB = b.imageIds.some(id => starredIds.has(id));
+      if (starA && !starB) return -1;
+      if (!starA && starB) return 1;
+    }
+    return b.size - a.size || a.prompt.localeCompare(b.prompt);
+  });
   return subGroups;
 }
 
@@ -139,7 +166,7 @@ function buildSubGroups(images: IndexedImage[]): StackSubGroup[] {
  * Group images by similarityGroupId or stackGroupId (fast, O(n)).
  * Used when annotations have been loaded and stackGroupId is available.
  */
-function groupByAnnotation(images: IndexedImage[]): StackItem[] {
+function groupByAnnotation(images: IndexedImage[], displayStarredFirst: boolean): StackItem[] {
   const stackGroups = new Map<string, IndexedImage[]>();
   const ungrouped: IndexedImage[] = [];
 
@@ -160,14 +187,20 @@ function groupByAnnotation(images: IndexedImage[]): StackItem[] {
   const result: StackItem[] = [];
 
   for (const [, groupImages] of stackGroups) {
-    const sorted = [...groupImages].sort(
-      (a, b) => (b.lastModified || 0) - (a.lastModified || 0)
-    );
+    const sorted = [...groupImages].sort((a, b) => {
+      // When starred-first is enabled, favorited images come first within the stack
+      if (displayStarredFirst) {
+        if (a.isFavorite && !b.isFavorite) return -1;
+        if (!a.isFavorite && b.isFavorite) return 1;
+      }
+      // Then by lastModified descending (newest first)
+      return (b.lastModified || 0) - (a.lastModified || 0);
+    });
 
     if (sorted.length === 1) {
       result.push(sorted[0]);
     } else {
-      const subGroups = buildSubGroups(sorted);
+      const subGroups = buildSubGroups(sorted, displayStarredFirst);
 
       result.push({
         id: `stack-${sorted[0].id}`,
@@ -206,7 +239,7 @@ export const useImageStacking = (
     const hasAnnotations = images.some(img => img.stackGroupId !== undefined);
 
     const items = hasAnnotations
-      ? groupByAnnotation(images)
+      ? groupByAnnotation(images, displayStarredFirst)
       : images;
 
     return sortItems(items, sortOrder, displayStarredFirst, randomSeed);
