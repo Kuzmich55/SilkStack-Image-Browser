@@ -2,6 +2,8 @@ import React, { useCallback } from 'react';
 import { IndexedImage } from '../types';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useImageStore } from '../store/useImageStore';
+import { useThumbnail } from '../hooks/useThumbnail';
+import { safeLazy } from '../utils/safeLazy';
 
 interface SimilarityStackExpandedViewWrapperProps {
   images: IndexedImage[];
@@ -12,14 +14,24 @@ interface SimilarityStackExpandedViewWrapperProps {
   imageSize?: number;
 }
 
+// ── Thumbnail preloader ────────────────────────────────────────────────
+// Triggers useThumbnail for each image so thumbnails load before the
+// images become visible. One hook call per component instance satisfies
+// React's rules of hooks.
+
+const ThumbnailTrigger: React.FC<{ image: IndexedImage | null }> = ({ image }) => {
+  useThumbnail(image);
+  return null;
+};
+
 // Lazy-load the package component when AI features are available.
 // The compile-time ternary lets Vite/Rolldown tree-shake the import()
 // entirely when VITE_AI_FEATURES_AVAILABLE is false.
 const ExpandedViewInner = import.meta.env.VITE_AI_FEATURES_AVAILABLE
-  ? React.lazy(() =>
-      import('@ai-images-browser/ai-intelligence').then(m => ({
-        default: m.SimilarityStackExpandedView,
-      }))
+  ? safeLazy(
+      () => import('@ai-images-browser/ai-intelligence'),
+      'SimilarityStackExpandedView',
+      (mod) => (mod as any).SimilarityStackExpandedView,
     )
   : null;
 
@@ -36,11 +48,16 @@ const SimilarityStackExpandedViewWrapper: React.FC<SimilarityStackExpandedViewWr
   onImageClick,
   selectedImages,
   onBack,
-  imageSize,
+  imageSize: imageSizeProp,
 }) => {
+  const libraryImageSize = useSettingsStore(s => s.viewZoomLevels.library);
   const thumbnailsDisabled = useSettingsStore(s => s.disableThumbnails);
   const toggleFavorite = useImageStore(s => s.toggleFavorite);
   const toggleImageSelection = useImageStore(s => s.toggleImageSelection);
+
+  // Use the zoom level from settings when no explicit imageSize is provided.
+  // This makes the expanded view react to zoom slider changes.
+  const imageSize = imageSizeProp ?? libraryImageSize;
 
   const handleToggleFavorite = useCallback((imageId: string) => {
     toggleFavorite(imageId);
@@ -115,18 +132,15 @@ const SimilarityStackExpandedViewWrapper: React.FC<SimilarityStackExpandedViewWr
     return null;
   }
 
+  const Inner = ExpandedViewInner;
   return (
-    <React.Suspense
-      fallback={
-        <div className="flex items-center justify-center h-full">
-          <div className="flex flex-col items-center gap-3">
-            <div className="w-8 h-8 border-2 border-gray-600 border-t-gray-400 rounded-full animate-spin" />
-            <p className="text-sm text-gray-500">Loading stack view…</p>
-          </div>
-        </div>
-      }
-    >
-      <ExpandedViewInner
+    <>
+      {/* Trigger thumbnail loading for all images in the expanded view.
+          Each ThumbnailTrigger calls useThumbnail once (valid hook usage). */}
+      {images.map(img => (
+        <ThumbnailTrigger key={img.id} image={img} />
+      ))}
+      <Inner
         images={images as any}
         subGroups={subGroups}
         onImageClick={onImageClick as any}
@@ -139,7 +153,7 @@ const SimilarityStackExpandedViewWrapper: React.FC<SimilarityStackExpandedViewWr
         onDragStart={handleDragStart as any}
         onDragEnd={handleDragEnd}
       />
-    </React.Suspense>
+    </>
   );
 };
 

@@ -1,6 +1,7 @@
 import React from 'react';
 import { ImageStack } from '../types';
 import { useThumbnail } from '../hooks/useThumbnail';
+import { safeLazy } from '../utils/safeLazy';
 
 interface StackCardWrapperProps {
   stack: ImageStack;
@@ -11,10 +12,10 @@ interface StackCardWrapperProps {
 // The compile-time ternary lets Vite/Rolldown tree-shake the import()
 // entirely when VITE_AI_FEATURES_AVAILABLE is false.
 const StackCardInner = import.meta.env.VITE_AI_FEATURES_AVAILABLE
-  ? React.lazy(() =>
-      import('@ai-images-browser/ai-intelligence').then(m => ({
-        default: m.StackCard,
-      }))
+  ? safeLazy(
+      () => import('@ai-images-browser/ai-intelligence'),
+      'StackCard',
+      (mod) => (mod as any).StackCard,
     )
   : null;
 
@@ -35,15 +36,8 @@ const StackCardWrapper: React.FC<StackCardWrapperProps> = ({ stack, onOpen }) =>
     return null;
   }
 
-  return (
-    <React.Suspense
-      fallback={
-        <div className="aspect-[4/5] rounded-2xl bg-gray-200 animate-pulse dark:bg-gray-800" />
-      }
-    >
-      <StackCardInner stack={stack as any} onOpen={onOpen} />
-    </React.Suspense>
-  );
+  const Inner = StackCardInner;
+  return <Inner stack={stack as any} onOpen={onOpen} />;
 };
 
 export default StackCardWrapper;
