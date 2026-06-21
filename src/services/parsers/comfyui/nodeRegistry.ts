@@ -370,16 +370,32 @@ export const NodeRegistry: Record<string, NodeDefinition> = {
     widget_order: ['text']
   },
   'Text Concatenate': {
-    category: 'UTILS', roles: ['SOURCE'],
-    inputs: { text1: { type: 'STRING' }, text2: { type: 'STRING' } },
+    category: 'UTILS', roles: ['TRANSFORM'],
+    inputs: { text1: { type: 'STRING' }, text2: { type: 'STRING' }, text3: { type: 'STRING' }, text4: { type: 'STRING' } },
     outputs: { STRING: { type: 'STRING' } },
-    param_mapping: { prompt: { source: 'input', key: 'text1' } }
+    param_mapping: {
+      prompt: {
+        source: 'custom_extractor',
+        extractor: (node, state, graph, traverseFromLink) => {
+          return extractors.concatTextExtractor(node, state, graph, traverseFromLink, ['text1', 'text2', 'text3', 'text4'], 'delimiter');
+        }
+      }
+    },
+    widget_order: ['text1', 'text2', 'text3', 'text4', 'delimiter']
   },
   'String Concatenate': {
-    category: 'UTILS', roles: ['SOURCE'],
-    inputs: { string1: { type: 'STRING' }, string2: { type: 'STRING' } },
+    category: 'UTILS', roles: ['TRANSFORM'],
+    inputs: { string1: { type: 'STRING' }, string2: { type: 'STRING' }, string3: { type: 'STRING' }, string4: { type: 'STRING' } },
     outputs: { STRING: { type: 'STRING' } },
-    param_mapping: { prompt: { source: 'input', key: 'string1' } }
+    param_mapping: {
+      prompt: {
+        source: 'custom_extractor',
+        extractor: (node, state, graph, traverseFromLink) => {
+          return extractors.concatTextExtractor(node, state, graph, traverseFromLink, ['string1', 'string2', 'string3', 'string4'], 'delimiter');
+        }
+      }
+    },
+    widget_order: ['string1', 'string2', 'string3', 'string4', 'delimiter']
   },
 
   // --- UTILS & PRIMITIVES ---

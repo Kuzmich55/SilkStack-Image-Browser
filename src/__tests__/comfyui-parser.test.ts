@@ -309,7 +309,7 @@ describe('ComfyUI Parser - SDXL and Utility Nodes', () => {
         }
       }
     };
-    
+
     const result = resolvePromptFromGraph({}, prompt);
     expect(result.prompt).toBe('global positive prompt');
     expect(result.negativePrompt).toBe('local negative prompt');
@@ -322,9 +322,135 @@ describe('ComfyUI Parser - SDXL and Utility Nodes', () => {
         "widgets_values": ["Extracted from ShowText node"]
       }
     };
-    
+
     // Should be found via global fallback since there's no sampler
     const result = resolvePromptFromGraph({}, prompt);
     expect(result.prompt).toBe('Extracted from ShowText node');
+  });
+});
+
+describe('ComfyUI Parser - Concatenated Multi-Input Prompts', () => {
+  it('should derive prompt from PrimitiveStringMultiline through String Concatenate into CLIPTextEncode', () => {
+    const fixture = loadFixture('concatenated-multiline-prompt.json');
+    const result = resolvePromptFromGraph(fixture.workflow, fixture.prompt);
+
+    expect(result.prompt).toContain('embedding:lazypos');
+    expect(result.prompt).toContain('great masterworkartistic');
+    expect(result.prompt).toContain('indian girl');
+    expect(result.prompt).toContain('red gown');
+    // Verify it's the full concatenated prompt, not just one input
+    expect(result.prompt).toBe(fixture.expectedPositivePrompt);
+  });
+
+  it('should concatenate TWO PrimitiveStringMultiline inputs through Text Concatenate', () => {
+    const fixture = loadFixture('two-multiline-concatenation.json');
+    const result = resolvePromptFromGraph(fixture.workflow, fixture.prompt);
+
+    // The expected prompt should contain text from BOTH multiline nodes
+    expect(result.prompt).toBe(fixture.expectedPositivePrompt);
+    // Verify key fragments from the FIRST multiline node are present
+    expect(result.prompt).toContain('(SUBJECT), (1girl)');
+    // Verify key fragments from the SECOND multiline node are present
+    expect(result.prompt).toContain('(cute), skinny');
+    expect(result.prompt).toContain('great masterworkartistic');
+  });
+
+  it('should detect standard traversal as primary method for concatenation workflows', () => {
+    const fixture = loadFixture('two-multiline-concatenation.json');
+    const result = resolvePromptFromGraph(fixture.workflow, fixture.prompt);
+
+    // The standard traversal should succeed — no fallback needed
+    expect(result._telemetry.detection_method).toBe('standard');
+    // Should NOT have fallback warnings since standard traversal works
+    const hasFallbackWarning = result._telemetry.warnings.some((w: string) =>
+      w.includes('fallback') || w.includes('last resort')
+    );
+    expect(hasFallbackWarning).toBe(false);
+  });
+});
+
+describe('ComfyUI Parser - Deep Topological Reconstructor (Tier 3)', () => {
+  it('should reconstruct prompt from unregistered concatenation node via deep fallback', () => {
+    // Use a custom node type NOT in the registry that still sits in the conditioning chain
+    const workflow = {
+      nodes: [
+        { id: 1, type: 'KSampler', mode: 0, widgets_values: [1, 'fixed', 20, 8, 'euler', 'normal', 1] },
+        { id: 2, type: 'CLIPTextEncode', mode: 0, widgets_values: [''] },
+        { id: 3, type: 'CustomStringJoiner', mode: 0, widgets_values: [] },
+        { id: 4, type: 'PrimitiveStringMultiline', mode: 0, widgets_values: [
+          'dragon, castle, fantasy art, epic scene, 8k, masterpiece'
+        ]},
+      ],
+      links: [
+        [1, 2, 0, 1, 1, "CONDITIONING"],
+        [2, 3, 0, 2, 1, "STRING"],
+        [3, 4, 0, 3, 0, "STRING"],
+      ]
+    };
+    const prompt = {
+      "1": {
+        "class_type": "KSampler",
+        "inputs": {
+          "seed": 1, "steps": 20, "cfg": 8, "sampler_name": "euler", "scheduler": "normal", "denoise": 1,
+          "model": ["10", 0], "positive": ["2", 0], "negative": ["9", 0], "latent_image": ["5", 0]
+        }
+      },
+      "2": {
+        "class_type": "CLIPTextEncode",
+        "inputs": { "text": ["3", 0], "clip": ["10", 1] }
+      },
+      "3": {
+        "class_type": "CustomStringJoiner",
+        "inputs": { "a": ["4", 0], "b": "" }
+      },
+      "4": {
+        "class_type": "PrimitiveStringMultiline",
+        "inputs": { "value": "dragon, castle, fantasy art, epic scene, 8k, masterpiece" }
+      }
+    };
+
+    const result = resolvePromptFromGraph(workflow, prompt);
+
+    // Should still find the prompt via standard traversal (CLIPTextEncode → CustomStringJoiner → PrimitiveStringMultiline)
+    // If standard traversal can't resolve the custom node, the deep reconstructor should catch it
+    expect(result.prompt).toBe('dragon, castle, fantasy art, epic scene, 8k, masterpiece');
+  });
+
+  it('should handle graph where ALL intermediate nodes are unregistered', () => {
+    const workflow = {
+      nodes: [
+        { id: 1, type: 'KSampler', mode: 0, widgets_values: [42, 'fixed', 30, 7, 'dpmpp_2m', 'karras', 1] },
+        { id: 2, type: 'UnknownConditioner', mode: 0, widgets_values: [] },
+        // No widgets_values here — text only lives in inputs so Tier 2 heuristic won't match
+        { id: 3, type: 'UnknownTextProvider', mode: 0, widgets_values: [] },
+      ],
+      links: [
+        [1, 2, 0, 1, 1, "CONDITIONING"],
+        [2, 3, 0, 2, 0, "STRING"],
+      ]
+    };
+    const prompt = {
+      "1": {
+        "class_type": "KSampler",
+        "inputs": {
+          "seed": 42, "steps": 30, "cfg": 7, "sampler_name": "dpmpp_2m", "scheduler": "karras", "denoise": 1,
+          "model": ["10", 0], "positive": ["2", 0], "negative": ["9", 0], "latent_image": ["5", 0]
+        }
+      },
+      "2": {
+        "class_type": "UnknownConditioner",
+        "inputs": { "text_input": ["3", 0] }
+      },
+      "3": {
+        "class_type": "UnknownTextProvider",
+        "inputs": { "prompt_text": "phoenix rising from ashes, digital painting" }
+      }
+    };
+
+    const result = resolvePromptFromGraph(workflow, prompt);
+
+    // Deep topological reconstructor should find this
+    expect(result.prompt).toBe('phoenix rising from ashes, digital painting');
+    expect(result._telemetry.warnings).toContain('Prompt extracted via deep topological reconstructor (last resort)');
   });
 });

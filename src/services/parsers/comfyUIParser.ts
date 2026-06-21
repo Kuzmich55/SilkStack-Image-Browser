@@ -616,8 +616,75 @@ function findTerminalNode(graph: Graph): ParserNode | null {
 }
 
 /**
+ * Generic text-source node types — any node whose primary purpose is to hold/pass text.
+ * Used by the global fallback scanner to identify nodes that may contain prompt text.
+ */
+const TEXT_SOURCE_NODE_TYPES = new Set([
+  'ShowText', 'String Literal', 'PrimitiveString', 'PrimitiveStringMultiline',
+  'SimpleText', 'Text Concatenate', 'String Concatenate', 'DF_Text_Box',
+  'String', 'ACE_TextGoogleTranslate',
+]);
+
+/**
+ * Names of input fields that typically contain prompt text across all registered node types.
+ */
+const TEXT_INPUT_NAMES = new Set([
+  'text', 'string', 'value', 'Text', 'String',
+  'text1', 'text2', 'text3', 'text4',
+  'string1', 'string2', 'string3', 'string4',
+  'a', 'b', 'c', 'd',
+  'clip_l', 't5xxl',
+]);
+
+/**
+ * Recursively collects text from a node and, when a text input is a
+ * link, follows it to the upstream node.  This is a best-effort
+ * collector for the global fallback — it only follows links that
+ * point into recognised text-source nodes so it doesn't wander
+ * into unrelated parts of the graph.
+ */
+function collectTextFromNodeDeep(
+  node: ParserNode,
+  graph: Graph,
+  visited: Set<string> = new Set(),
+): string | null {
+  if (!node || !node.class_type || node.mode === 2 || node.mode === 4) return null;
+  if (visited.has(node.id)) return null;
+  visited.add(node.id);
+
+  // --- Catch-all for any node whose text sits directly in inputs ---
+  for (const inputName of TEXT_INPUT_NAMES) {
+    const raw = node.inputs?.[inputName];
+    if (typeof raw === 'string' && raw.length > 3) return raw;
+    // If the input is a link to another text-source node, follow it
+    if (Array.isArray(raw) && raw.length === 2) {
+      const [upstreamId] = raw;
+      const upstream = graph[upstreamId];
+      if (upstream) {
+        const result = collectTextFromNodeDeep(upstream, graph, visited);
+        if (result) return result;
+      }
+    }
+  }
+
+  // --- Check widgets_values for long-enough strings ---
+  if (Array.isArray(node.widgets_values)) {
+    for (const w of node.widgets_values) {
+      if (typeof w === 'string' && w.length > 10) return w;
+    }
+  }
+
+  return null;
+}
+
+/**
  * Fallback: Scans the entire graph for any nodes that might contain prompt text.
  * Used when standard graph traversal fails.
+ *
+ * This is now a three-tier scanner:
+ *  Tier 1 — CLIPTextEncode* nodes (the canonical prompt carriers)
+ *  Tier 2 — Known text-source node types with deep link following
+ *  Tier 3 — Any other node whose widgets_values contain something prompt-shaped
  */
 function collectAllPossiblePrompts(graph: Graph): { positive: string[]; negative: string[] } {
   const positive: string[] = [];
@@ -627,27 +694,69 @@ function collectAllPossiblePrompts(graph: Graph): { positive: string[]; negative
     const node = graph[nodeId];
     if (!node.class_type || node.mode === 2 || node.mode === 4) continue;
 
-    // 1. Check for CLIPTextEncode / Flux nodes
+    // --- Tier 1: CLIPTextEncode / Flux nodes ---
     if (node.class_type.includes('CLIPTextEncode')) {
-      // Try to find the text widget/input
-      const text = node.inputs?.text || node.inputs?.clip_l || node.inputs?.t5xxl || 
-                   node.widgets_values?.[0] || node.widgets_values?.[node.widgets_values.length - 1];
-      
-      if (typeof text === 'string' && text.length > 3) {
-        // Simple heuristic: if it contains words common in negative prompts, it might be negative
+      // Try the text input first (may be a link)
+      const textInput = node.inputs?.text;
+      let text: string | null = null;
+
+      if (Array.isArray(textInput) && textInput.length === 2) {
+        const [upstreamId] = textInput;
+        const upstream = graph[upstreamId];
+        if (upstream) {
+          text = collectTextFromNodeDeep(upstream, graph);
+        }
+      }
+      if (!text) {
+        text = typeof textInput === 'string' ? textInput : null;
+      }
+      if (!text) {
+        text = node.inputs?.clip_l || node.inputs?.t5xxl || null;
+      }
+      if (!text && node.widgets_values?.length) {
+        // Heuristic: the last string widget is often the prompt text
+        for (let i = node.widgets_values.length - 1; i >= 0; i--) {
+          if (typeof node.widgets_values[i] === 'string') {
+            text = node.widgets_values[i];
+            break;
+          }
+        }
+      }
+
+      if (text && typeof text === 'string' && text.length > 3) {
         const lower = text.toLowerCase();
-        const isLikelyNegative = lower.includes('blurry') || lower.includes('bad quality') || lower.includes('lowres') || lower.includes('watermark');
-        
+        const isLikelyNegative = lower.includes('blurry') || lower.includes('bad quality') ||
+          lower.includes('lowres') || lower.includes('watermark') ||
+          lower.includes('bad anatomy') || lower.includes('worst quality');
         if (isLikelyNegative) negative.push(text);
         else positive.push(text);
       }
     }
 
-    // 2. Check for specialized Text/String nodes
-    if (['ShowText', 'String Literal', 'PrimitiveString', 'SimpleText', 'Text Concatenate'].includes(node.class_type)) {
-      const text = node.widgets_values?.[0] || node.inputs?.text || node.inputs?.string || node.inputs?.value;
-      if (typeof text === 'string' && text.length > 10) {
-        positive.push(text);
+    // --- Tier 2: Known text-source node types ---
+    if (TEXT_SOURCE_NODE_TYPES.has(node.class_type)) {
+      // Try deep collection (handles linked inputs through concat chains)
+      const deepText = collectTextFromNodeDeep(node, graph);
+      if (deepText && deepText.length > 3) {
+        positive.push(deepText);
+        continue;
+      }
+
+      // Shallow fallback
+      const shallow = node.widgets_values?.[0] || node.inputs?.text ||
+        node.inputs?.string || node.inputs?.value;
+      if (typeof shallow === 'string' && shallow.length > 5) {
+        positive.push(shallow);
+      }
+    }
+
+    // --- Tier 3: Any unclassified node with prompt-shaped widgets ---
+    if (Array.isArray(node.widgets_values)) {
+      for (const w of node.widgets_values) {
+        if (typeof w === 'string' && w.length > 40 && w.includes(',')) {
+          positive.push(w);
+          break;
+        }
       }
     }
   }
@@ -662,6 +771,97 @@ function selectBestFallbackPrompt(candidates: string[]): string | null {
 }
 
 /**
+ * ─── DEEP PROMPT RECONSTRUCTOR ─────────────────────────────────────────
+ * A purely topological walker that traces the positive‑conditioning path
+ * from the terminal node backwards, collecting ALL text from ALL reachable
+ * nodes.  It needs NO node‑registry entries — it works on graph structure
+ * alone.  This is the last line of defence when every other strategy fails.
+ *
+ * Strategy:
+ *  1. Find the conditioning link(s) from the terminal node.
+ *  2. BFS backwards through the graph, following ALL links.
+ *  3. At each visited node, harvest text from:
+ *     a. Any input whose VALUE is a plain string ( ≥ 5 chars)
+ *     b. Any widget_values entry that is a long string
+ *  4. Also try to resolve texts from inputs that are LINKS by walking them.
+ *  5. Return the longest candidate (heuristic).
+ */
+function deepPromptReconstructor(
+  terminalNode: ParserNode,
+  graph: Graph,
+  param: 'prompt' | 'negativePrompt',
+): string | null {
+  // Names of conditioning inputs on terminal nodes (positive vs negative)
+  const CONDITIONING_INPUTS: Record<string, string[]> = {
+    prompt: ['positive', 'guider', 'conditioning'],
+    negativePrompt: ['negative'],
+  };
+
+  const targetInputs = CONDITIONING_INPUTS[param] || [];
+  const collectedTexts: string[] = [];
+  const visited = new Set<string>();
+  const queue: string[] = [];
+
+  // Seed the queue with conditioning inputs from the terminal node
+  if (terminalNode) {
+    for (const inputName of targetInputs) {
+      const link = terminalNode.inputs?.[inputName];
+      if (Array.isArray(link) && link.length === 2) {
+        queue.push(link[0]);
+      }
+    }
+  }
+
+  // BFS — follow ALL links to collect text from every reachable node
+  while (queue.length > 0) {
+    const nodeId = queue.shift()!;
+    if (visited.has(nodeId)) continue;
+    const node = graph[nodeId];
+    if (!node || !node.class_type) continue;
+    if (node.mode === 2 || node.mode === 4) continue; // muted
+    visited.add(nodeId);
+
+    // Harvest text from this node's inputs
+    if (node.inputs) {
+      for (const [inputName, value] of Object.entries(node.inputs)) {
+        if (typeof value === 'string' && value.length >= 5) {
+          collectedTexts.push(value);
+        } else if (Array.isArray(value) && value.length === 2) {
+          // Follow every link — we're being exhaustive in fallback mode
+          const linkId = value[0] as string;
+          if (!visited.has(linkId)) {
+            queue.push(linkId);
+          }
+        }
+      }
+    }
+
+    // Harvest text from widget values
+    if (Array.isArray(node.widgets_values)) {
+      for (const w of node.widgets_values) {
+        if (typeof w === 'string' && w.length >= 5) {
+          collectedTexts.push(w);
+        }
+      }
+    }
+  }
+
+  if (collectedTexts.length === 0) return null;
+
+  // Deduplicate while preserving order
+  const seen = new Set<string>();
+  const unique = collectedTexts.filter(t => {
+    const normalized = t.trim();
+    if (seen.has(normalized)) return false;
+    seen.add(normalized);
+    return true;
+  });
+
+  // Pick the longest as the primary candidate (heuristic that works well)
+  return unique.sort((a, b) => b.length - a.length)[0];
+}
+
+/**
  * Ponto de entrada principal. Resolve todos os parâmetros de metadados de um grafo.
  */
 export function resolvePromptFromGraph(workflow: any, prompt: any): Record<string, any> {
@@ -670,9 +870,9 @@ export function resolvePromptFromGraph(workflow: any, prompt: any): Record<strin
     unknown_nodes_count: 0,
     warnings: [] as string[],
   };
-  
+
   const graph = createNodeMap(workflow, prompt);
-  
+
   // Count unknown nodes for telemetry
   for (const nodeId in graph) {
     const node = graph[nodeId];
@@ -682,7 +882,7 @@ export function resolvePromptFromGraph(workflow: any, prompt: any): Record<strin
       telemetry.warnings.push(`Unknown node type: ${node.class_type}`);
     }
   }
-  
+
   const terminalNode = findTerminalNode(graph);
 
   // Check if terminal node was found
@@ -697,7 +897,7 @@ export function resolvePromptFromGraph(workflow: any, prompt: any): Record<strin
     params: ['prompt', 'negativePrompt', 'seed', 'steps', 'cfg', 'model', 'sampler_name', 'scheduler', 'lora', 'vae', 'denoise']
   });
 
-  // --- GLOBAL FALLBACK ---
+  // --- TIER 2 FALLBACK: Global graph scanner ---
   // If standard traversal failed to find a prompt, use the global graph scanner
   if (!results.prompt || (typeof results.prompt === 'string' && results.prompt.length < 3)) {
     const fallback = collectAllPossiblePrompts(graph);
@@ -706,9 +906,26 @@ export function resolvePromptFromGraph(workflow: any, prompt: any): Record<strin
       results.prompt = bestPositive;
       telemetry.warnings.push('Prompt extracted via global graph fallback (standard traversal failed)');
     }
-    
+
     if (!results.negativePrompt && fallback.negative.length > 0) {
       results.negativePrompt = selectBestFallbackPrompt(fallback.negative);
+    }
+  }
+
+  // --- TIER 3 FALLBACK: Deep topological reconstructor ---
+  // If STILL no prompt, try topology-only walking (works without any node definitions)
+  if (!results.prompt || (typeof results.prompt === 'string' && results.prompt.length < 3)) {
+    const reconstructed = deepPromptReconstructor(terminalNode, graph, 'prompt');
+    if (reconstructed) {
+      results.prompt = reconstructed;
+      telemetry.warnings.push('Prompt extracted via deep topological reconstructor (last resort)');
+    }
+  }
+  if (!results.negativePrompt || (typeof results.negativePrompt === 'string' && results.negativePrompt.length < 3)) {
+    const reconstructedNeg = deepPromptReconstructor(terminalNode, graph, 'negativePrompt');
+    if (reconstructedNeg) {
+      results.negativePrompt = reconstructedNeg;
+      telemetry.warnings.push('Negative prompt extracted via deep topological reconstructor (last resort)');
     }
   }
 

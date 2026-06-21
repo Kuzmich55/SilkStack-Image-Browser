@@ -1,0 +1,105 @@
+{
+  "description": "Real-world test: two PrimitiveStringMultiline nodes feed into a String Concatenate, which feeds into CLIPTextEncode as the positive prompt. This pattern is common when users compose prompts across multiple text inputs in ComfyUI.",
+  "expectedPositivePrompt": "embedding:lazypos, score_9, score_8_up, score_7_up, (SUBJECT), (1girl), (cute), skinny, indian girl, luxurious wet black hair, innocent, looking at viewer, red gown, supermodel, solo, intricate details, artistic photorealism, ((godrays)), pastoral atmosphere, (in love), smooth, great masterworkartistic",
+  "workflow": {
+    "nodes": [
+      {
+        "id": 3,
+        "type": "KSampler",
+        "widgets_values": [381564805005045, "randomize", 4, 1, "euler", "simple", 1],
+        "mode": 0
+      },
+      {
+        "id": 4,
+        "type": "CheckpointLoaderSimple",
+        "widgets_values": ["model.safetensors"],
+        "mode": 0
+      },
+      {
+        "id": 6,
+        "type": "CLIPTextEncode",
+        "widgets_values": [""],
+        "mode": 0
+      },
+      {
+        "id": 7,
+        "type": "CLIPTextEncode",
+        "widgets_values": ["blurry, low quality, bad anatomy, worst quality"],
+        "mode": 0
+      },
+      {
+        "id": 50,
+        "type": "String Concatenate",
+        "widgets_values": ["", "", " ", ""],
+        "mode": 0
+      },
+      {
+        "id": 114,
+        "type": "PrimitiveStringMultiline",
+        "widgets_values": [
+          "embedding:lazypos, score_9, score_8_up, score_7_up, (SUBJECT), (1girl), (cute), skinny, indian girl, luxurious wet black hair, innocent, looking at viewer, red gown, supermodel, solo, intricate details, artistic photorealism, ((godrays)), pastoral atmosphere, (in love), smooth, great masterworkartistic"
+        ],
+        "mode": 0
+      }
+    ],
+    "links": [
+      [74, 4, 1, 6, 0, "CLIP"],
+      [75, 4, 1, 7, 0, "CLIP"],
+      [100, 50, 0, 6, 1, "STRING"],
+      [187, 114, 0, 50, 0, "STRING"],
+      [317, 6, 0, 3, 1, "CONDITIONING"],
+      [318, 7, 0, 3, 2, "CONDITIONING"]
+    ]
+  },
+  "prompt": {
+    "3": {
+      "class_type": "KSampler",
+      "inputs": {
+        "seed": 381564805005045,
+        "steps": 4,
+        "cfg": 1,
+        "sampler_name": "euler",
+        "scheduler": "simple",
+        "denoise": 1,
+        "model": ["4", 0],
+        "positive": ["6", 0],
+        "negative": ["7", 0],
+        "latent_image": ["58", 0]
+      }
+    },
+    "4": {
+      "class_type": "CheckpointLoaderSimple",
+      "inputs": {
+        "ckpt_name": "model.safetensors"
+      }
+    },
+    "6": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "text": ["50", 0],
+        "clip": ["4", 1]
+      }
+    },
+    "7": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "text": "blurry, low quality, bad anatomy, worst quality",
+        "clip": ["4", 1]
+      }
+    },
+    "50": {
+      "class_type": "String Concatenate",
+      "inputs": {
+        "string1": ["114", 0],
+        "string2": "",
+        "delimiter": " "
+      }
+    },
+    "114": {
+      "class_type": "PrimitiveStringMultiline",
+      "inputs": {
+        "value": "embedding:lazypos, score_9, score_8_up, score_7_up, (SUBJECT), (1girl), (cute), skinny, indian girl, luxurious wet black hair, innocent, looking at viewer, red gown, supermodel, solo, intricate details, artistic photorealism, ((godrays)), pastoral atmosphere, (in love), smooth, great masterworkartistic"
+      }
+    }
+  }
+}
