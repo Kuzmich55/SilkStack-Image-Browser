@@ -1772,6 +1772,49 @@ function setupFileOperationHandlers() {
     }
   });
 
+  // Handle open file with OS default application (native viewer)
+  ipcMain.handle("open-file", async (event, filePath) => {
+    try {
+      if (!isPathAllowed(filePath)) {
+        console.error(
+          "SECURITY VIOLATION: Attempted to open file outside of allowed directories.",
+        );
+        return {
+          success: false,
+          error:
+            "Access denied: Cannot open files outside of the allowed directories.",
+        };
+      }
+
+      const normalizedPath = path.normalize(filePath);
+      console.log("📂 Attempting to open file in native viewer:", normalizedPath);
+
+      // Verify the file exists before trying to open it
+      try {
+        const stats = await fs.stat(normalizedPath);
+        if (!stats.isFile()) {
+          return { success: false, error: "Path is not a file" };
+        }
+      } catch (accessError) {
+        return {
+          success: false,
+          error: `File does not exist: ${normalizedPath}`,
+        };
+      }
+
+      const errorMessage = await shell.openPath(normalizedPath);
+      if (errorMessage) {
+        return { success: false, error: errorMessage };
+      }
+      console.log("✅ Opened file in native viewer:", normalizedPath);
+
+      return { success: true };
+    } catch (error) {
+      console.error("❌ Error opening file in native viewer:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
   ipcMain.handle("is-dev", () => isDev);
 
   // Handle open cache location (without security restrictions since it's app's internal cache)

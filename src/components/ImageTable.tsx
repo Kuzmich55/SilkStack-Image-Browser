@@ -5,7 +5,7 @@ import { type IndexedImage } from '../types';
 import { getAspectRatio } from '../utils/imageUtils';
 import { useContextMenu } from '../hooks/useContextMenu';
 import { useImageStore } from '../store/useImageStore';
-import { Copy, Folder, ArrowUpDown, ArrowUp, ArrowDown, Info, Package, Play } from 'lucide-react';
+import { Copy, ExternalLink, Folder, ArrowUpDown, ArrowUp, ArrowDown, Info, Package, Play } from 'lucide-react';
 import { useThumbnail } from '../hooks/useThumbnail';
 import { useSettingsStore } from '../store/useSettingsStore';
 
@@ -44,6 +44,7 @@ const ImageTable: React.FC<ImageTableProps> = ({ images, onImageClick, selectedI
     copyImage,
     copyModel,
     showInFolder,
+    openWithNativeViewer,
     copyRawMetadata
   } = useContextMenu();
 
@@ -314,6 +315,14 @@ const ImageTable: React.FC<ImageTableProps> = ({ images, onImageClick, selectedI
             </button>
 
           <div className="border-t border-gray-600 my-1"></div>
+
+          <button
+            onClick={openWithNativeViewer}
+            className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition-colors flex items-center gap-2"
+          >
+            <ExternalLink className="w-4 h-4" />
+            Open in Native Viewer
+          </button>
 
           <button
             onClick={showInFolder}

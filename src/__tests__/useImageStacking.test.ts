@@ -231,4 +231,34 @@ describe('useImageStacking Hook', () => {
     expect(stack.subGroups[0].prompt).toBe('a cat');
     expect(stack.subGroups[0].size).toBe(2);
   });
+
+  it('sorts subGroups by the latest image lastModified date descending', () => {
+    useImageStore.setState({ sortOrder: 'date-desc' });
+    useSettingsStore.setState({ displayStarredFirst: false });
+
+    // Group 1: prompt "Prompt A", size 3, newest image has lastModified: 500
+    // Group 2: prompt "Prompt B", size 1, newest image has lastModified: 1000
+    const images: IndexedImage[] = [
+      createImage({ id: '1', prompt: 'Prompt A', lastModified: 500, stackGroupId: 'sim-group-1' }),
+      createImage({ id: '2', prompt: 'Prompt A', lastModified: 400, stackGroupId: 'sim-group-1' }),
+      createImage({ id: '3', prompt: 'Prompt A', lastModified: 300, stackGroupId: 'sim-group-1' }),
+      createImage({ id: '4', prompt: 'Prompt B', lastModified: 1000, stackGroupId: 'sim-group-1' }),
+    ];
+
+    const { result } = renderHook(() => useImageStacking(images, true));
+    const stacked = result.current.stackedItems;
+
+    expect(stacked.length).toBe(1);
+
+    const stack = stacked[0] as any;
+    expect(stack.subGroups).toBeDefined();
+    expect(stack.subGroups.length).toBe(2);
+
+    // Group B contains the latest image (lastModified: 1000) vs Group A (lastModified: 500)
+    // So Group B (Prompt B) must be first, despite having a smaller size (1) than Group A (3)
+    expect(stack.subGroups[0].prompt).toBe('Prompt B');
+    expect(stack.subGroups[0].size).toBe(1);
+    expect(stack.subGroups[1].prompt).toBe('Prompt A');
+    expect(stack.subGroups[1].size).toBe(3);
+  });
 });

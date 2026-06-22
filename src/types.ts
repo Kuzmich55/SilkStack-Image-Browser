@@ -116,6 +116,9 @@ export interface ElectronAPI {
   openDirectory: (
     path: string,
   ) => Promise<{ success: boolean; error?: string }>;
+  openFile: (
+    filePath: string,
+  ) => Promise<{ success: boolean; error?: string }>;
   ensureDirectory: (
     dirPath: string,
   ) => Promise<{ success: boolean; error?: string }>;

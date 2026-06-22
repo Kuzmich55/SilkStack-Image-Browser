@@ -1,7 +1,7 @@
 import React, { useEffect, useState, FC, useCallback, useRef } from "react";
 import { type IndexedImage, type BaseMetadata, type LoRAInfo } from "../types";
 import { FileOperations } from "../services/fileOperations";
-import { copyImageToClipboard, showInExplorer, getAspectRatio } from "../utils/imageUtils";
+import { copyImageToClipboard, showInExplorer, openInNativeViewer, getAspectRatio } from "../utils/imageUtils";
 import {
   Copy,
   Pencil,
@@ -23,6 +23,7 @@ import {
   ZoomOut,
   Maximize,
   Minimize,
+  ExternalLink,
 } from "lucide-react";
 import hotkeyManager from "../services/hotkeyManager";
 import { useImageStore } from "../store/useImageStore";
@@ -913,6 +914,15 @@ const ImageModal: React.FC<ImageModalProps> = ({
     }
     // The showInExplorer utility can handle the full path directly
     showInExplorer(`${directoryPath}/${image.name}`);
+  };
+
+  const openWithNativeViewer = () => {
+    hideContextMenu();
+    if (!directoryPath) {
+      alert("Cannot determine file location: directory path is missing.");
+      return;
+    }
+    openInNativeViewer(`${directoryPath}/${image.name}`);
   };
 
   // Reset zoom and pan when image changes
@@ -2035,6 +2045,14 @@ const ImageModal: React.FC<ImageModalProps> = ({
           </button>
 
           <div className="border-t border-gray-600 my-1"></div>
+
+          <button
+            onClick={openWithNativeViewer}
+            className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-gray-50 transition-colors flex items-center gap-2"
+          >
+            <ExternalLink className="w-4 h-4" />
+            Open in Native Viewer
+          </button>
 
           <button
             onClick={showInFolder}

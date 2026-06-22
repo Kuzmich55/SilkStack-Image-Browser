@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { type IndexedImage } from '../types';
-import { copyImageToClipboard, showInExplorer, copyFilePathToClipboard } from '../utils/imageUtils';
+import { copyImageToClipboard, showInExplorer, openInNativeViewer, copyFilePathToClipboard } from '../utils/imageUtils';
 import { useSettingsStore } from '../store/useSettingsStore';
 
 interface ContextMenuState {
@@ -135,6 +135,14 @@ export const useContextMenu = () => {
     showInExplorer(`${contextMenu.directoryPath}/${contextMenu.image.name}`);
   };
 
+  const openWithNativeViewer = () => {
+    if (!contextMenu.image || !contextMenu.directoryPath) {
+      alert('Cannot determine file location: directory path is missing.');
+      return;
+    }
+    hideContextMenu();
+    openInNativeViewer(`${contextMenu.directoryPath}/${contextMenu.image.name}`);
+  };
 
 
   const copyRawMetadata = () => {
@@ -153,6 +161,7 @@ export const useContextMenu = () => {
     copyImage,
     copyModel,
     showInFolder,
+    openWithNativeViewer,
     copyRawMetadata
   };
 };

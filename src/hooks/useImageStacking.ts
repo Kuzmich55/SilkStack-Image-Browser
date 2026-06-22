@@ -126,7 +126,13 @@ function buildSubGroups(images: IndexedImage[], displayStarredFirst: boolean): S
   // Build a set of starred image IDs for fast lookup in sub-group sorting
   const starredIds = new Set(images.filter(img => img.isFavorite).map(img => img.id));
 
-  const subGroups: StackSubGroup[] = [];
+  interface SubGroupWithDate {
+    sg: StackSubGroup;
+    maxLastModified: number;
+  }
+
+  const subGroupItems: SubGroupWithDate[] = [];
+
   for (const [, sgImages] of byPrompt) {
     const sorted = [...sgImages].sort((a, b) => {
       // Starred images first within each sub-group
@@ -138,26 +144,36 @@ function buildSubGroups(images: IndexedImage[], displayStarredFirst: boolean): S
       return (b.lastModified || 0) - (a.lastModified || 0);
     });
     const prompt = resolvePrompt(sorted[0]);
-    subGroups.push({
-      promptHash: simpleHash(prompt),
-      prompt,
-      imageIds: sorted.map(img => img.id),
-      coverImageId: sorted[0].id,
-      size: sorted.length,
+    const maxLastModified = sgImages.reduce((max, img) => Math.max(max, img.lastModified || 0), 0);
+
+    subGroupItems.push({
+      sg: {
+        promptHash: simpleHash(prompt),
+        prompt,
+        imageIds: sorted.map(img => img.id),
+        coverImageId: sorted[0].id,
+        size: sorted.length,
+      },
+      maxLastModified,
     });
   }
 
-  // Sort sub-groups: starred-containing first, then by size (largest first), then alphabetically
-  subGroups.sort((a, b) => {
+  // Sort sub-groups: starred-containing first, then by the latest image's date descending, then size, then alphabetically
+  subGroupItems.sort((a, b) => {
     if (displayStarredFirst) {
-      const starA = a.imageIds.some(id => starredIds.has(id));
-      const starB = b.imageIds.some(id => starredIds.has(id));
+      const starA = a.sg.imageIds.some(id => starredIds.has(id));
+      const starB = b.sg.imageIds.some(id => starredIds.has(id));
       if (starA && !starB) return -1;
       if (!starA && starB) return 1;
     }
-    return b.size - a.size || a.prompt.localeCompare(b.prompt);
+    // Newest image first
+    if (b.maxLastModified !== a.maxLastModified) {
+      return b.maxLastModified - a.maxLastModified;
+    }
+    return b.sg.size - a.sg.size || a.sg.prompt.localeCompare(b.sg.prompt);
   });
-  return subGroups;
+
+  return subGroupItems.map(item => item.sg);
 }
 
 // ── Grouping strategies ────────────────────────────────────────────────
