@@ -495,8 +495,17 @@ const ImageGridRowComponent = React.memo(({ index, style, data }: ListChildCompo
                                   isBlurred={isSensitive && enableSafeMode && blurSensitiveImages}
                                   getDragPayload={getDragPayload}
                               />
-                              <div onClick={(e) => { e.stopPropagation(); handleStackClick(item); }} className="absolute top-2 right-10 bg-black/60 text-white text-[11px] font-medium px-2 py-0.5 rounded-md backdrop-blur-md z-20 border border-white/10 shadow-sm cursor-pointer hover:bg-black/80">+{item.count}</div>
-                              <div onClick={(e) => { e.stopPropagation(); handleStackClick(item); }} className="absolute bottom-2 right-2 bg-black/60 text-white text-[11px] font-medium px-2 py-0.5 rounded-md backdrop-blur-md z-20 border border-white/10 shadow-sm cursor-pointer hover:bg-black/80">Stack</div>
+                              <div
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleStackClick(item);
+                                }}
+                                className="absolute bottom-2 right-2 bg-gradient-to-r from-blue-600/95 to-indigo-600/95 hover:from-blue-500 hover:to-indigo-500 text-white text-[11px] font-semibold px-2.5 py-1 rounded-md backdrop-blur-md z-20 border border-blue-400/40 shadow-[0_0_8px_rgba(59,130,246,0.25)] hover:shadow-[0_0_14px_rgba(99,102,241,0.45)] flex items-center gap-1.5 transition-all duration-200 hover:scale-105 active:scale-95 cursor-pointer"
+                                title={`Open stack (${item.count} images)`}
+                              >
+                                <Layers size={11} className="text-blue-100" />
+                                <span>Stack ({item.count})</span>
+                              </div>
                           </div>
                         </div>
                     );
