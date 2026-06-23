@@ -2902,8 +2902,6 @@ export const useImageStore = create<ImageState>((set, get) => {
                         annotations: newAnnotations,
                     });
 
-                    console.log(`Stack analysis complete: ${updatedAnnotations.length} images analyzed`);
-
                     // After assigning exact stackGroupIds, schedule similarity
                     // group computation with a short delay so the grid renders
                     // first and the UI stays responsive during processing.
@@ -3396,7 +3394,6 @@ export const useImageStore = create<ImageState>((set, get) => {
                 }
 
                 if (newStackGroupIds.size === 0) {
-                    console.log('[SimilarityGroups] No new prompt groups — nothing to merge');
                     return;
                 }
 

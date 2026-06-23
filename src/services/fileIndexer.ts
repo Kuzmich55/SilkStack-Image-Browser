@@ -9,6 +9,7 @@ import { parseVideoMetaHubMetadata } from './parsers/videoMetaHubParser';
 import { parseInvokeAIMetadata } from './parsers/invokeAIParser';
 import { parseA1111Metadata } from './parsers/automatic1111Parser';
 import { parseSwarmUIMetadata } from './parsers/swarmUIParser';
+import { parseWebPMetadata } from './parsers/binaryParsers';
 
 // Simple throttle utility to avoid excessive progress updates
 function throttle<T extends (...args: any[]) => any>(func: T, delay: number): T {
@@ -246,14 +247,21 @@ function isMetaHubSaveNodePayload(payload: any): payload is Record<string, any> 
 
   const data = payload as Record<string, any>;
   const generator = data.generator ?? data.Generator;
-  const hasMetaHubMarkers = Boolean(
+
+  // CRITICAL: Use only MetaHub-SPECIFIC markers — do NOT include `workflow`
+  // (a standard ComfyUI field that would false-match any ComfyUI JSON).
+  const hasMetaHubSpecificMarkers = Boolean(
     data.imh_pro ||
     data._metahub_pro ||
-    data.analytics ||
-    data._analytics ||
-    data.workflow ||
     data.prompt_api
   );
+  // analytics / _analytics are strong indicators of MetaHub but occasionally appear
+  // in other ComfyUI extensions; require them to be combined with core fields.
+  const hasMetaHubAnalytics = Boolean(
+    data.analytics || data._analytics
+  );
+  const hasStrongMetaHubSignal = hasMetaHubSpecificMarkers || hasMetaHubAnalytics;
+
   const hasCoreFields = Boolean(
     data.prompt ||
     data.negativePrompt ||
@@ -263,7 +271,11 @@ function isMetaHubSaveNodePayload(payload: any): payload is Record<string, any> 
     data.model
   );
 
-  return (generator === 'ComfyUI' && (hasMetaHubMarkers || hasCoreFields)) || (hasMetaHubMarkers && hasCoreFields);
+  // Only match as MetaHub when there's a MetaHub-specific signal present.
+  // Generic ComfyUI workflows (without imh_pro / _metahub_pro / prompt_api / analytics)
+  // must NOT match — they go through the standard ComfyUI normalization instead.
+  return (generator === 'ComfyUI' && hasStrongMetaHubSignal && hasCoreFields) ||
+         (hasStrongMetaHubSignal && hasCoreFields);
 }
 
 function wrapMetaHubData(payload: any): ImageMetadata | null {
@@ -542,8 +554,40 @@ async function parseJPEGMetadata(buffer: ArrayBuffer): Promise<ImageMetadata | n
         if (metaHubData) {
           return metaHubData;
         }
+
+        // Check if ImageDescription contains a ComfyUI workflow JSON
+        // (strong indicators: class_type, last_node_id, nodes array, or workflow/prompt objects)
+        if (imageDesc.includes('"class_type"') ||
+            imageDesc.includes('"last_node_id"') ||
+            (imageDesc.includes('"nodes"') && imageDesc.includes('"links"')) ||
+            (imageDesc.includes('"workflow"') && imageDesc.includes('"inputs"'))) {
+          try {
+            // Strip known prefixes (e.g. "Workflow:{...}")
+            let jsonText = imageDesc;
+            if (!jsonText.startsWith('{')) {
+              const firstBrace = jsonText.indexOf('{');
+              if (firstBrace > 0) jsonText = jsonText.substring(firstBrace);
+            }
+            const parsed = JSON.parse(jsonText);
+            if (typeof parsed.workflow === 'string') {
+              parsed.workflow = JSON.parse(sanitizeJson(parsed.workflow));
+            }
+            if (typeof parsed.prompt === 'string') {
+              parsed.prompt = JSON.parse(sanitizeJson(parsed.prompt));
+            }
+            // If this is a raw workflow graph (has nodes/links/last_node_id but no
+            // workflow/prompt wrapper), wrap it so downstream normalization detects it.
+            if (!parsed.workflow && !parsed.prompt &&
+                (parsed.last_node_id !== undefined || Array.isArray(parsed.nodes))) {
+              return { workflow: parsed } as ImageMetadata;
+            }
+            return parsed as ImageMetadata;
+          } catch {
+            // JSON parse failed; fall through to text-based detection below
+          }
+        }
       } catch {
-        // Not JSON or not MetaHub metadata, continue with normal parsing
+        // Not JSON or not parseable, continue with normal parsing
       }
     }
 
@@ -767,228 +811,7 @@ async function parseJPEGMetadata(buffer: ArrayBuffer): Promise<ImageMetadata | n
     return null;
   }
 }
-
-async function parseWebPMetadata(buffer: ArrayBuffer): Promise<ImageMetadata | null> {
-  try {
-    // WebP stores EXIF in an 'EXIF' chunk within the RIFF container
-    // We need to extract the EXIF chunk first, then parse it with exifr
-    const view = new DataView(buffer);
-    const decoder = new TextDecoder();
-
-    const findExifTiffHeaderOffset = (bytes: Uint8Array): number => {
-      if (bytes.length < 4) {
-        return -1;
-      }
-
-      // JPEG-style EXIF header ("Exif\0\0") prefix
-      if (bytes.length >= 6 &&
-          bytes[0] === 0x45 && bytes[1] === 0x78 && bytes[2] === 0x69 && bytes[3] === 0x66 &&
-          bytes[4] === 0x00 && bytes[5] === 0x00) {
-        return 6;
-      }
-
-      // TIFF header at start
-      if ((bytes[0] === 0x49 && bytes[1] === 0x49) || (bytes[0] === 0x4d && bytes[1] === 0x4d)) {
-        return 0;
-      }
-
-      // Scan for TIFF header within the first 64 bytes (handles extra padding)
-      const limit = Math.min(64, bytes.length - 4);
-      for (let i = 0; i <= limit; i++) {
-        if (bytes[i] === 0x49 && bytes[i + 1] === 0x49 && bytes[i + 2] === 0x2a && bytes[i + 3] === 0x00) {
-          return i;
-        }
-        if (bytes[i] === 0x4d && bytes[i + 1] === 0x4d && bytes[i + 2] === 0x00 && bytes[i + 3] === 0x2a) {
-          return i;
-        }
-      }
-
-      // Fallback: find II/MM without the 0x2a marker (last resort)
-      const fallbackLimit = Math.min(64, bytes.length - 2);
-      for (let i = 0; i <= fallbackLimit; i++) {
-        if ((bytes[i] === 0x49 && bytes[i + 1] === 0x49) || (bytes[i] === 0x4d && bytes[i + 1] === 0x4d)) {
-          return i;
-        }
-      }
-
-      return -1;
-    };
-
-    // Verify RIFF header
-    if (decoder.decode(buffer.slice(0, 4)) !== 'RIFF') {
-      return null;
-    }
-
-    // Verify WEBP format
-    if (decoder.decode(buffer.slice(8, 12)) !== 'WEBP') {
-      return null;
-    }
-
-    // Search for EXIF chunk
-    let offset = 12; // Skip RIFF header and WEBP signature
-    let exifChunkData: ArrayBuffer | null = null;
-
-    while (offset + 8 <= view.byteLength) {
-      const chunkType = decoder.decode(buffer.slice(offset, offset + 4));
-      const chunkSize = view.getUint32(offset + 4, true); // Little-endian
-
-      if (chunkType === 'EXIF') {
-        // Found EXIF chunk!
-        const exifStart = offset + 8; // Skip chunk header (type + size)
-        const rawExifData = buffer.slice(exifStart, exifStart + chunkSize);
-        const rawBytes = new Uint8Array(rawExifData);
-        const tiffHeaderOffset = findExifTiffHeaderOffset(rawBytes);
-
-        if (tiffHeaderOffset >= 0) {
-          exifChunkData = rawExifData.slice(tiffHeaderOffset);
-        } else {
-          // No TIFF header detected; attempt JSON extraction (MetaHub Save Node payloads)
-          let jsonStartOffset = -1;
-          for (let i = 0; i < rawBytes.length - 1; i++) {
-            if (rawBytes[i] === 0x7b && rawBytes[i + 1] === 0x22) { // '{"'
-              jsonStartOffset = i;
-              break;
-            }
-          }
-
-          if (jsonStartOffset >= 0) {
-            const jsonBytes = rawExifData.slice(jsonStartOffset);
-            const jsonString = decoder.decode(jsonBytes).trim();
-            let braceCount = 0;
-            let jsonEnd = -1;
-            for (let i = 0; i < jsonString.length; i++) {
-              if (jsonString[i] === '{') braceCount++;
-              if (jsonString[i] === '}') braceCount--;
-              if (braceCount === 0) {
-                jsonEnd = i + 1;
-                break;
-              }
-            }
-
-            if (jsonEnd > 0) {
-              const completeJson = jsonString.substring(0, jsonEnd);
-              try {
-                const parsed = JSON.parse(completeJson);
-                const metaHubData = wrapMetaHubData(parsed);
-                if (metaHubData) {
-                  return metaHubData;
-                }
-              } catch {
-                // Failed to parse JSON, continue
-              }
-            }
-          }
-
-          exifChunkData = rawExifData; // Try exifr anyway as fallback
-        }
-
-        break;
-      }
-
-      // Move to next chunk (align to even byte boundary)
-      offset += 8 + chunkSize;
-      if (chunkSize % 2 !== 0) offset += 1;
-    }
-
-    if (!exifChunkData) {
-      return null;
-    }
-
-    // Now parse the EXIF data with exifr
-    const exifData = await parse(exifChunkData, {
-      userComment: true,
-      xmp: true,
-      mergeOutput: true,
-      sanitize: false,
-      reviveValues: true
-    });
-
-    if (!exifData) {
-      return null;
-    }
-
-    if ((exifData as any).imagemetahub_data) {
-      try {
-        const parsed = typeof (exifData as any).imagemetahub_data === 'string'
-          ? JSON.parse((exifData as any).imagemetahub_data)
-          : (exifData as any).imagemetahub_data;
-        const wrapped = wrapMetaHubData({ imagemetahub_data: parsed });
-        if (wrapped) {
-          return wrapped;
-        }
-      } catch {
-        const wrapped = wrapMetaHubData({ imagemetahub_data: (exifData as any).imagemetahub_data });
-        if (wrapped) {
-          return wrapped;
-        }
-      }
-    }
-
-    // PRIORITY 0: Check for MetaHub Save Node JSON in ImageDescription (WebP save format)
-    // MetaHub Save Node stores the IMH metadata as JSON in EXIF ImageDescription for WebP
-    if (exifData.ImageDescription) {
-      try {
-        const imageDesc = typeof exifData.ImageDescription === 'string'
-          ? exifData.ImageDescription
-          : new TextDecoder('utf-8').decode(exifData.ImageDescription);
-
-        const metaHubData = tryParseMetaHubJson(imageDesc);
-        if (metaHubData) {
-          return metaHubData;
-        }
-      } catch (e) {
-        // Not JSON or not MetaHub metadata, continue with normal parsing
-      }
-    }
-
-    // Fall back to regular JPEG parsing logic (UserComment, etc.)
-    // Reuse the JPEG parsing by reconstructing metadataText
-    let metadataText: string | Uint8Array | undefined =
-      exifData.UserComment ||
-      exifData.userComment ||
-      exifData['User Comment'] ||
-      exifData.ImageDescription ||
-      exifData.Parameters ||
-      exifData.Description ||
-      null;
-
-    if (!metadataText) {
-      return null;
-    }
-
-    // Convert Uint8Array to string if needed
-    if (metadataText instanceof Uint8Array) {
-      let startOffset = 0;
-      for (let i = 0; i < Math.min(20, metadataText.length); i++) {
-        if (metadataText[i] === 0x7B) { // '{' character
-          startOffset = i;
-          break;
-        }
-      }
-      if (startOffset === 0 && metadataText.length > 8) {
-        startOffset = 8;
-      }
-      const cleanedData = Array.from(metadataText.slice(startOffset)).filter(byte => byte !== 0x00);
-      metadataText = new TextDecoder('utf-8').decode(new Uint8Array(cleanedData));
-    }
-
-    const metaHubFromText = tryParseMetaHubJson(metadataText);
-    if (metaHubFromText) {
-      return metaHubFromText;
-    }
-
-    // Check for ComfyUI first
-    if (metadataText.includes('Version: ComfyUI')) {
-      return { parameters: metadataText };
-    }
-
-    // Check for A1111/other formats
-    return { parameters: metadataText };
-  } catch (e) {
-    console.error('[WebP DEBUG] Error in parseWebPMetadata:', e);
-    return null;
-  }
-}
+// (parseWebPMetadata is imported from ./parsers/binaryParsers.ts)
 
 // Extract dimensions without decoding the full image
 function extractDimensionsFromBuffer(buffer: ArrayBuffer): { width: number; height: number } | null {
@@ -1811,16 +1634,6 @@ export async function processFiles(
       return;
     }
     if (phaseAStats.processed >= nextPhaseALog || phaseAStats.processed === totalPhaseAFiles) {
-      const elapsed = performance.now() - phaseAStats.startTime;
-      const avg = phaseAStats.processed > 0 ? elapsed / phaseAStats.processed : 0;
-      console.log('[indexing]', {
-        phase: 'A',
-        files: phaseAStats.processed,
-        ipc_calls: phaseAStats.ipcCalls,
-        writes: phaseAStats.diskWrites,
-        bytes_written: phaseAStats.bytesWritten,
-        avg_ms_per_file: Number(avg.toFixed(2)),
-      });
       nextPhaseALog += 5000;
     }
   };
@@ -2104,14 +1917,12 @@ export async function processFiles(
   );
 
   const runEnrichmentPhase = async () => {
-    console.log(`[indexing] Starting Phase B with ${totalEnrichment} images to enrich`);
     phaseBStats.startTime = performance.now();
     lastPhaseBLogTime = phaseBStats.startTime;
     performance.mark('indexing:phaseB:start');
 
     const queue = [...needsEnrichment];
     throttledEnrichmentProgress({ processed: 0, total: totalEnrichment });
-    console.log(`[indexing] Phase B progress initialized: 0/${totalEnrichment}`);
     const resultsBatch: IndexedImage[] = [];
     const touchedChunks = new Set<number>();
     const DIRTY_CHUNK_FLUSH_THRESHOLD = 12;
@@ -2124,47 +1935,10 @@ export async function processFiles(
     const logPhaseBProgress = (queueLength: number) => {
       const now = performance.now();
       const elapsed = now - phaseBStats.startTime;
-      const shouldLogCount = phaseBStats.processed >= nextPhaseBLog;
-      const shouldLogTime = now - lastPhaseBLogTime >= phaseBLogIntervalMs;
-      if (shouldLogCount || shouldLogTime || phaseBStats.processed === queueLength) {
-        const avg = phaseBStats.processed > 0 ? elapsed / phaseBStats.processed : 0;
-        const profileSamples = phaseBStats.profileSamples;
-        const profileAvgTotal = profileSamples > 0 ? phaseBStats.profileTotalMs / profileSamples : 0;
-        const profileAvgParse = profileSamples > 0 ? phaseBStats.profileParseMs / profileSamples : 0;
-        const profileAvgNormalize = profileSamples > 0 ? phaseBStats.profileNormalizeMs / profileSamples : 0;
-        const profileAvgDimensions = profileSamples > 0 ? phaseBStats.profileDimensionsMs / profileSamples : 0;
-        const flushAvgMs = phaseBStats.flushChunks > 0 ? phaseBStats.flushMs / phaseBStats.flushChunks : 0;
-        const headReadAvgMs = phaseBStats.headReadFiles > 0 ? phaseBStats.headReadMs / phaseBStats.headReadFiles : 0;
-        const tailReadAvgMs = phaseBStats.tailReadFiles > 0 ? phaseBStats.tailReadMs / phaseBStats.tailReadFiles : 0;
-        const fullReadAvgMs = phaseBStats.fullReadFiles > 0 ? phaseBStats.fullReadMs / phaseBStats.fullReadFiles : 0;
-
-        console.log('[indexing]', {
-          phase: 'B',
-          files: phaseBStats.processed,
-          ipc_calls: phaseBStats.ipcCalls,
-          writes: phaseBStats.diskWrites,
-          bytes_written: phaseBStats.bytesWritten,
-          avg_ms_per_file: Number(avg.toFixed(2)),
-          flush_avg_ms: Number(flushAvgMs.toFixed(2)),
-          head_read_files: phaseBStats.headReadFiles,
-          head_read_avg_ms: Number(headReadAvgMs.toFixed(2)),
-          tail_read_files: phaseBStats.tailReadFiles,
-          tail_read_hits: phaseBStats.tailReadHits,
-          tail_read_avg_ms: Number(tailReadAvgMs.toFixed(2)),
-          full_read_files: phaseBStats.fullReadFiles,
-          full_read_avg_ms: Number(fullReadAvgMs.toFixed(2)),
-          profile_samples: profileSamples,
-          profile_avg_total_ms: Number(profileAvgTotal.toFixed(2)),
-          profile_avg_parse_ms: Number(profileAvgParse.toFixed(2)),
-          profile_avg_normalize_ms: Number(profileAvgNormalize.toFixed(2)),
-          profile_avg_dimensions_ms: Number(profileAvgDimensions.toFixed(2)),
-        });
-
-        if (shouldLogCount) {
-          nextPhaseBLog += nextPhaseBLogStep;
-        }
-        lastPhaseBLogTime = now;
+      if (phaseBStats.processed >= nextPhaseBLog) {
+        nextPhaseBLog += nextPhaseBLogStep;
       }
+      lastPhaseBLogTime = now;
     };
 
     const commitBatch = async (force = false) => {
@@ -2391,13 +2165,18 @@ export async function processFiles(
       if (!fileSize || fileSize <= buffer.byteLength) {
         return false;
       }
-      const hasMetadata = Boolean(enriched?.metadataString) ||
-        (enriched?.metadata && Object.keys(enriched.metadata).length > 0);
-      if (hasMetadata) {
+      // Check for MEANINGFUL metadata — not just the dimensions-only stub that gets
+      // created when VP8X dimensions are extracted but no AI parameters were found.
+      const norm = enriched?.metadata?.normalizedMetadata as Record<string, unknown> | undefined;
+      const hasRealMetadata = Boolean(
+        enriched?.metadataString ||
+        (norm && (norm.prompt || norm.model || norm.seed || norm.steps))
+      );
+      if (hasRealMetadata) {
         return false;
       }
       const fileType = entry.source.type ?? inferMimeTypeFromName(entry.source.handle.name);
-      return fileType === 'image/png';
+      return fileType === 'image/png' || fileType === 'image/webp' || fileType === 'image/jpeg';
     };
 
     const shouldCheckTailForMetaHub = (
@@ -2465,9 +2244,6 @@ export async function processFiles(
           : await (window as any).electronAPI.readFilesBatch(filePaths);
         const readDuration = performance.now() - readStart;
 
-        if (readResult.debug) {
-            console.log('[Phase B Debug] Batch Stats:', readResult.debug);
-        }
         if (useHeadRead) {
           phaseBStats.headReadFiles += filePaths.length;
           phaseBStats.headReadMs += readDuration;
@@ -2675,7 +2451,6 @@ export async function processFiles(
       detail: { elapsedMs, files: phaseBStats.processed }
     });
 
-    console.log(`[indexing] Phase B complete: ${phaseBStats.processed}/${totalEnrichment} images enriched in ${(elapsedMs / 1000).toFixed(2)}s`);
     throttledEnrichmentProgress({ processed: phaseBStats.processed, total: totalEnrichment });
   };
 

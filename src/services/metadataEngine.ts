@@ -6,6 +6,7 @@ import { promisify } from 'util';
 import exifr from 'exifr';
 import { BaseMetadata, ImageMetadata, type VideoInfo, isEasyDiffusionJson } from '../types';
 import { parseImageMetadata as normalizeMetadata } from './parsers/metadataParserFactory';
+import { parseWebPMetadata } from './parsers/binaryParsers';
 
 interface Dimensions {
   width: number;
@@ -18,7 +19,7 @@ export interface MetadataEngineResult {
   rawMetadata: ImageMetadata | null;
   metadata: BaseMetadata | null;
   dimensions?: Dimensions | null;
-  rawSource?: 'png' | 'jpeg' | 'sidecar' | 'video' | 'unknown';
+  rawSource?: 'png' | 'jpeg' | 'webp' | 'sidecar' | 'video' | 'unknown';
   errors?: string[];
   schema_version: string;
   _telemetry: {
@@ -303,6 +304,7 @@ async function parseJPEGMetadata(buffer: ArrayBuffer): Promise<ImageMetadata | n
 function extractDimensionsFromBuffer(buffer: ArrayBuffer): Dimensions | null {
   const view = new DataView(buffer);
 
+  // PNG: IHDR chunk at byte 16
   if (view.getUint32(0) === 0x89504e47 && view.getUint32(4) === 0x0d0a1a0a) {
     const width = view.getUint32(16, false);
     const height = view.getUint32(20, false);
@@ -311,6 +313,7 @@ function extractDimensionsFromBuffer(buffer: ArrayBuffer): Dimensions | null {
     }
   }
 
+  // JPEG: SOF markers
   if (view.getUint16(0) === 0xffd8) {
     let offset = 2;
     const length = view.byteLength;
@@ -337,11 +340,66 @@ function extractDimensionsFromBuffer(buffer: ArrayBuffer): Dimensions | null {
     }
   }
 
+  // WebP: RIFF container with VP8X, VP8 , or VP8L chunks
+  if (view.getUint32(0) === 0x52494646 && view.getUint32(8) === 0x57454250) {
+    let offset = 12;
+    while (offset + 8 <= view.byteLength) {
+      const chunkType = String.fromCharCode(
+        view.getUint8(offset),
+        view.getUint8(offset + 1),
+        view.getUint8(offset + 2),
+        view.getUint8(offset + 3)
+      );
+      const chunkSize = view.getUint32(offset + 4, true);
+      const chunkDataOffset = offset + 8;
+      const chunkDataEnd = chunkDataOffset + chunkSize;
+
+      if (chunkDataEnd > view.byteLength) {
+        break;
+      }
+
+      if (chunkType === 'VP8X' && chunkDataOffset + 10 <= view.byteLength) {
+        const widthMinusOne = view.getUint8(chunkDataOffset + 4) |
+          (view.getUint8(chunkDataOffset + 5) << 8) |
+          (view.getUint8(chunkDataOffset + 6) << 16);
+        const heightMinusOne = view.getUint8(chunkDataOffset + 7) |
+          (view.getUint8(chunkDataOffset + 8) << 8) |
+          (view.getUint8(chunkDataOffset + 9) << 16);
+        return { width: widthMinusOne + 1, height: heightMinusOne + 1 };
+      }
+
+      if (chunkType === 'VP8 ' && chunkDataOffset + 10 <= view.byteLength) {
+        const width = (view.getUint8(chunkDataOffset + 6) | (view.getUint8(chunkDataOffset + 7) << 8)) & 0x3FFF;
+        const height = (view.getUint8(chunkDataOffset + 8) | (view.getUint8(chunkDataOffset + 9) << 8)) & 0x3FFF;
+        if (width > 0 && height > 0) {
+          return { width, height };
+        }
+      }
+
+      if (chunkType === 'VP8L' && chunkDataOffset + 5 <= view.byteLength) {
+        const signature = view.getUint8(chunkDataOffset);
+        if (signature === 0x2f) {
+          const b1 = view.getUint8(chunkDataOffset + 1);
+          const b2 = view.getUint8(chunkDataOffset + 2);
+          const b3 = view.getUint8(chunkDataOffset + 3);
+          const b4 = view.getUint8(chunkDataOffset + 4);
+          const width = 1 + (b1 | ((b2 & 0x3F) << 8));
+          const height = 1 + (((b2 & 0xC0) >> 6) | (b3 << 2) | ((b4 & 0x0F) << 10));
+          if (width > 0 && height > 0) {
+            return { width, height };
+          }
+        }
+      }
+
+      offset = chunkDataEnd + (chunkSize % 2);
+    }
+  }
+
   return null;
 }
 
 async function tryReadEasyDiffusionSidecarJson(imagePath: string): Promise<ImageMetadata | null> {
-  const jsonPath = imagePath.replace(/\.(png|jpg|jpeg)$/i, '.json');
+  const jsonPath = imagePath.replace(/\.(png|jpg|jpeg|webp)$/i, '.json');
   const isAbsolutePath = /^[a-zA-Z]:[\\/]/.test(jsonPath) || jsonPath.startsWith('/');
 
   if (!isAbsolutePath || !jsonPath || jsonPath === imagePath) {
@@ -412,6 +470,10 @@ export async function parseImageFile(filePath: string): Promise<MetadataEngineRe
     } else if (view.getUint16(0) === 0xffd8) {
       rawMetadata = await parseJPEGMetadata(arrayBuffer);
       rawSource = 'jpeg';
+    } else if (view.getUint32(0) === 0x52494646 && view.getUint32(8) === 0x57454250) {
+      // RIFF + WEBP signature
+      rawMetadata = await parseWebPMetadata(arrayBuffer);
+      rawSource = 'webp';
     }
   }
 

@@ -542,21 +542,15 @@ export default function App() {
     return () => unsubscribe();
   }, [directories, processDeletedWatchedFiles]);
 
-  // Watcher debug logs
-  useEffect(() => {
-    if (!window.electronAPI?.onWatcherDebug) return;
-
-    console.log('[App] Setting up watcher-debug listener');
-    const unsubscribe = window.electronAPI.onWatcherDebug(({ message }) => {
-      console.log('[WATCHER-DEBUG]', message);
-    });
-    console.log('[App] watcher-debug listener registered successfully');
-
-    return () => {
-      console.log('[App] Cleaning up watcher-debug listener');
-      unsubscribe();
-    };
-  }, []);
+  // Watcher debug listener — disabled by default.
+  // Uncomment for troubleshooting file-watch issues.
+  // useEffect(() => {
+  //   if (!window.electronAPI?.onWatcherDebug) return;
+  //   const unsubscribe = window.electronAPI.onWatcherDebug(({ message }) => {
+  //     console.log('[WATCHER-DEBUG]', message);
+  //   });
+  //   return () => { unsubscribe(); };
+  // }, []);
 
   // Restore auto-watchers on app start
   useEffect(() => {

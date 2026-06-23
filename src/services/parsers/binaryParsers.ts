@@ -107,14 +107,21 @@ function isMetaHubSaveNodePayload(payload: any): payload is Record<string, any> 
 
   const data = payload as Record<string, any>;
   const generator = data.generator ?? data.Generator;
-  const hasMetaHubMarkers = Boolean(
+
+  // CRITICAL: Use only MetaHub-SPECIFIC markers — do NOT include `workflow`
+  // (a standard ComfyUI field that would false-match any ComfyUI JSON).
+  const hasMetaHubSpecificMarkers = Boolean(
     data.imh_pro ||
     data._metahub_pro ||
-    data.analytics ||
-    data._analytics ||
-    data.workflow ||
     data.prompt_api
   );
+  // analytics / _analytics are strong indicators of MetaHub but occasionally appear
+  // in other ComfyUI extensions; require them to be combined with core fields.
+  const hasMetaHubAnalytics = Boolean(
+    data.analytics || data._analytics
+  );
+  const hasStrongMetaHubSignal = hasMetaHubSpecificMarkers || hasMetaHubAnalytics;
+
   const hasCoreFields = Boolean(
     data.prompt ||
     data.negativePrompt ||
@@ -124,7 +131,11 @@ function isMetaHubSaveNodePayload(payload: any): payload is Record<string, any> 
     data.model
   );
 
-  return (generator === 'ComfyUI' && (hasMetaHubMarkers || hasCoreFields)) || (hasMetaHubMarkers && hasCoreFields);
+  // Only match as MetaHub when there's a MetaHub-specific signal present.
+  // Generic ComfyUI workflows (without imh_pro / _metahub_pro / prompt_api / analytics)
+  // must NOT match — they go through the standard ComfyUI normalization instead.
+  return (generator === 'ComfyUI' && hasStrongMetaHubSignal && hasCoreFields) ||
+         (hasStrongMetaHubSignal && hasCoreFields);
 }
 
 function wrapMetaHubData(payload: any): ImageMetadata | null {
@@ -354,8 +365,40 @@ export async function parseJPEGMetadata(buffer: ArrayBuffer): Promise<ImageMetad
         if (metaHubData) {
           return metaHubData;
         }
+
+        // Check if ImageDescription contains a ComfyUI workflow JSON
+        // (strong indicators: class_type, last_node_id, nodes array, or workflow/prompt objects)
+        if (imageDesc.includes('"class_type"') ||
+            imageDesc.includes('"last_node_id"') ||
+            (imageDesc.includes('"nodes"') && imageDesc.includes('"links"')) ||
+            (imageDesc.includes('"workflow"') && imageDesc.includes('"inputs"'))) {
+          try {
+            // Strip known prefixes (e.g. "Workflow:{...}")
+            let jsonText = imageDesc;
+            if (!jsonText.startsWith('{')) {
+              const firstBrace = jsonText.indexOf('{');
+              if (firstBrace > 0) jsonText = jsonText.substring(firstBrace);
+            }
+            const parsed = JSON.parse(jsonText);
+            if (typeof parsed.workflow === 'string') {
+              parsed.workflow = JSON.parse(sanitizeJson(parsed.workflow));
+            }
+            if (typeof parsed.prompt === 'string') {
+              parsed.prompt = JSON.parse(sanitizeJson(parsed.prompt));
+            }
+            // If this is a raw workflow graph (has nodes/links/last_node_id but no
+            // workflow/prompt wrapper), wrap it so downstream normalization detects it.
+            if (!parsed.workflow && !parsed.prompt &&
+                (parsed.last_node_id !== undefined || Array.isArray(parsed.nodes))) {
+              return { workflow: parsed } as ImageMetadata;
+            }
+            return parsed as ImageMetadata;
+          } catch {
+            // JSON parse failed; fall through to text-based detection below
+          }
+        }
       } catch {
-        // Not JSON or not MetaHub metadata, continue with normal parsing
+        // Not JSON or not parseable, continue with normal parsing
       }
     }
 
@@ -580,10 +623,154 @@ export async function parseJPEGMetadata(buffer: ArrayBuffer): Promise<ImageMetad
   }
 }
 
+/**
+ * Decode XML character entities (&amp;lt;, &amp;gt;, &amp;amp;, &amp;quot;, &amp;apos;)
+ * and numeric character references (&#xNNNN;, &#NNNN;) back to plain text.
+ */
+function decodeXmlEntities(xml: string): string {
+  return xml
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)));
+}
+
+/**
+ * Extract text content from an XML element that may contain rdf:Alt/rdf:li wrappers
+ * or have rdf:parseType="Literal" for direct text content.
+ */
+function extractRdfText(xmlContent: string): string | null {
+  // Case 1: rdf:Alt → rdf:li wrappers (XMP standard for multi-language text)
+  const liRegex = /<rdf:li[^>]*>([\s\S]*?)<\/rdf:li>/gi;
+  const liTexts: string[] = [];
+  let liMatch: RegExpExecArray | null;
+  while ((liMatch = liRegex.exec(xmlContent)) !== null) {
+    const text = liMatch[1].trim();
+    if (text) liTexts.push(decodeXmlEntities(text));
+  }
+  if (liTexts.length > 0) {
+    return liTexts.join('\n');
+  }
+
+  // Case 2: rdf:parseType="Literal" — text directly inside element
+  const literalMatch = xmlContent.match(/rdf:parseType\s*=\s*["']Literal["']/i);
+  if (literalMatch) {
+    const plainText = xmlContent.replace(/<[^>]+>/g, '').trim();
+    if (plainText) return decodeXmlEntities(plainText);
+  }
+
+  // Case 3: Plain text content (no rdf wrappers)
+  const plainText = xmlContent.replace(/<[^>]+>/g, '').trim();
+  if (plainText) return decodeXmlEntities(plainText);
+
+  return null;
+}
+
+/**
+ * Extract human-readable text from an XMP XML string.
+ * Looks for dc:description → rdf:Alt → rdf:li content, which is where
+ * most AI image generators store their generation parameters in XMP.
+ * Also checks exif:UserComment, xmp:Description, dc:title, and
+ * photoshop:Headline as fallbacks.
+ */
+function extractTextFromXmp(xmpXml: string): string | null {
+  // Strip BOM if present
+  const cleanXml = xmpXml.replace(/^﻿/, '');
+
+  // Priority 1: dc:description (most common for AI generation parameters)
+  const dcDescRegex = /<dc:description[^>]*>([\s\S]*?)<\/dc:description>/i;
+  const dcDescMatch = cleanXml.match(dcDescRegex);
+  if (dcDescMatch) {
+    const text = extractRdfText(dcDescMatch[1]);
+    if (text) return text;
+  }
+
+  // Priority 2: exif:UserComment (some tools store AI params here in XMP)
+  const exifUcRegex = /<exif:UserComment[^>]*>([\s\S]*?)<\/exif:UserComment>/i;
+  const exifUcMatch = cleanXml.match(exifUcRegex);
+  if (exifUcMatch) {
+    const text = extractRdfText(exifUcMatch[1]);
+    if (text) return text;
+  }
+
+  // Priority 3: xmp:Description (used by some tools)
+  const xmpDescRegex = /<xmp:Description[^>]*>([\s\S]*?)<\/xmp:Description>/i;
+  const xmpDescMatch = cleanXml.match(xmpDescRegex);
+  if (xmpDescMatch) {
+    const text = extractRdfText(xmpDescMatch[1]);
+    if (text) return text;
+  }
+
+  // Priority 4: dc:title
+  const dcTitleRegex = /<dc:title[^>]*>([\s\S]*?)<\/dc:title>/i;
+  const dcTitleMatch = cleanXml.match(dcTitleRegex);
+  if (dcTitleMatch) {
+    const text = extractRdfText(dcTitleMatch[1]);
+    if (text) return text;
+  }
+
+  // Priority 5: photoshop:Headline or photoshop:Caption (Adobe tools)
+  const psRegex = /<photoshop:(?:Headline|Caption)[^>]*>([\s\S]*?)<\/photoshop:(?:Headline|Caption)>/i;
+  const psMatch = cleanXml.match(psRegex);
+  if (psMatch) {
+    const text = extractRdfText(psMatch[1]);
+    if (text) return text;
+  }
+
+  return null;
+}
+
+/**
+ * Check if an XMP text block contains a raw JSON payload (e.g. MetaHub Save Node
+ * storing its metadata as JSON inside an XMP description field).
+ * Uses balanced-brace scanning for reliable JSON extraction.
+ */
+function tryExtractJsonFromXmpText(text: string): ImageMetadata | null {
+  // Find the first '{' that looks like a JSON object start
+  const firstBrace = text.indexOf('{');
+  if (firstBrace === -1) return null;
+
+  // Balanced brace scan to find the matching closing brace
+  let braceCount = 0;
+  let jsonEnd = -1;
+  for (let i = firstBrace; i < text.length; i++) {
+    if (text[i] === '{') braceCount++;
+    else if (text[i] === '}') {
+      braceCount--;
+      if (braceCount === 0) {
+        jsonEnd = i + 1;
+        break;
+      }
+    }
+  }
+
+  if (jsonEnd === -1) return null;
+
+  const jsonCandidate = text.substring(firstBrace, jsonEnd);
+  try {
+    const parsed = JSON.parse(jsonCandidate);
+    const metaHubData = wrapMetaHubData(parsed);
+    if (metaHubData) return metaHubData;
+    // Check for ComfyUI workflow/prompt in JSON form
+    if (parsed.workflow || parsed.prompt || parsed.last_node_id) {
+      return parsed as ImageMetadata;
+    }
+    // Check for other known JSON metadata formats
+    if (parsed.sui_image_params || parsed.c2pa_manifest ||
+        isInvokeAIMetadata(parsed) || isComfyUIMetadata(parsed)) {
+      return parsed as ImageMetadata;
+    }
+  } catch {
+    // Not valid JSON, continue
+  }
+  return null;
+}
+
 export async function parseWebPMetadata(buffer: ArrayBuffer): Promise<ImageMetadata | null> {
   try {
-    // WebP stores EXIF in an 'EXIF' chunk within the RIFF container
-    // We need to extract the EXIF chunk first, then parse it with exifr
     const view = new DataView(buffer);
     const decoder = new TextDecoder();
 
@@ -636,17 +823,22 @@ export async function parseWebPMetadata(buffer: ArrayBuffer): Promise<ImageMetad
       return null;
     }
 
-    // Search for EXIF chunk
+    // Walk all RIFF chunks, collecting EXIF and XMP data
     let offset = 12; // Skip RIFF header and WEBP signature
     let exifChunkData: ArrayBuffer | null = null;
+    let xmpText: string | null = null;
 
     while (offset + 8 <= view.byteLength) {
       const chunkType = decoder.decode(buffer.slice(offset, offset + 4));
       const chunkSize = view.getUint32(offset + 4, true); // Little-endian
 
+      if (offset + 8 + chunkSize > view.byteLength) {
+        break;
+      }
+
       if (chunkType === 'EXIF') {
-        // Found EXIF chunk!
-        const exifStart = offset + 8; // Skip chunk header (type + size)
+        // Found EXIF chunk
+        const exifStart = offset + 8;
         const rawExifData = buffer.slice(exifStart, exifStart + chunkSize);
         const rawBytes = new Uint8Array(rawExifData);
         const tiffHeaderOffset = findExifTiffHeaderOffset(rawBytes);
@@ -654,7 +846,7 @@ export async function parseWebPMetadata(buffer: ArrayBuffer): Promise<ImageMetad
         if (tiffHeaderOffset >= 0) {
           exifChunkData = rawExifData.slice(tiffHeaderOffset);
         } else {
-          // No TIFF header detected; attempt JSON extraction (MetaHub Save Node payloads)
+          // No TIFF header detected; try JSON extraction (MetaHub Save Node payloads)
           let jsonStartOffset = -1;
           for (let i = 0; i < rawBytes.length - 1; i++) {
             if (rawBytes[i] === 0x7b && rawBytes[i + 1] === 0x22) { // '{"'
@@ -693,20 +885,62 @@ export async function parseWebPMetadata(buffer: ArrayBuffer): Promise<ImageMetad
 
           exifChunkData = rawExifData; // Try exifr anyway as fallback
         }
-
-        break;
+      } else if (chunkType === 'XMP ') {
+        // Found XMP chunk — extract the raw XML text
+        const xmpStart = offset + 8;
+        const xmpBytes = buffer.slice(xmpStart, xmpStart + chunkSize);
+        xmpText = decoder.decode(xmpBytes).trim();
       }
 
-      // Move to next chunk (align to even byte boundary)
+      // Continue to next chunk — don't break early, we want both EXIF and XMP
       offset += 8 + chunkSize;
       if (chunkSize % 2 !== 0) offset += 1;
     }
 
+    // ── Process XMP data first (highest priority for AI generation params) ──
+    let xmpMetadataText: string | null = null;
+    if (xmpText) {
+      // First check for raw JSON embedded in XMP (MetaHub Save Node, ComfyUI, etc.)
+      const jsonFromXmp = tryExtractJsonFromXmpText(xmpText);
+      if (jsonFromXmp) {
+        return jsonFromXmp;
+      }
+
+      // Extract human-readable description text from XMP XML
+      xmpMetadataText = extractTextFromXmp(xmpText);
+
+      // If XMP contains recognizable AI metadata, return it directly
+      if (xmpMetadataText) {
+        const metaHubFromXmp = tryParseMetaHubJson(xmpMetadataText);
+        if (metaHubFromXmp) {
+          return metaHubFromXmp;
+        }
+
+        // Check for ComfyUI, A1111, and other known patterns in XMP text
+        if (xmpMetadataText.includes('Version: ComfyUI') ||
+            (xmpMetadataText.includes('Steps:') && xmpMetadataText.includes('Sampler:')) ||
+            xmpMetadataText.includes('Prompt:') ||
+            xmpMetadataText.includes('Negative prompt:') ||
+            xmpMetadataText.includes('--v') || xmpMetadataText.includes('--ar') ||
+            xmpMetadataText.includes('Midjourney') ||
+            xmpMetadataText.includes('Guidance Scale:') ||
+            xmpMetadataText.includes('sui_image_params')) {
+          return { parameters: xmpMetadataText };
+        }
+      }
+    }
+
+    // ── Process EXIF data ──
     if (!exifChunkData) {
+      // No EXIF chunk found. If we have XMP text that didn't match known patterns,
+      // return it as a fallback parameters blob so downstream parsers can try.
+      if (xmpMetadataText) {
+        return { parameters: xmpMetadataText };
+      }
       return null;
     }
 
-    // Now parse the EXIF data with exifr
+    // Parse the EXIF data with exifr
     const exifData = await parse(exifChunkData, {
       userComment: true,
       xmp: true,
@@ -716,9 +950,14 @@ export async function parseWebPMetadata(buffer: ArrayBuffer): Promise<ImageMetad
     });
 
     if (!exifData) {
+      // EXIF parsing failed; fall back to XMP text if available
+      if (xmpMetadataText) {
+        return { parameters: xmpMetadataText };
+      }
       return null;
     }
 
+    // Check for imagemetahub_data in EXIF
     if ((exifData as any).imagemetahub_data) {
       try {
         const parsed = typeof (exifData as any).imagemetahub_data === 'string'
@@ -736,25 +975,78 @@ export async function parseWebPMetadata(buffer: ArrayBuffer): Promise<ImageMetad
       }
     }
 
-    // PRIORITY 0: Check for MetaHub Save Node JSON in ImageDescription (WebP save format)
-    // MetaHub Save Node stores the IMH metadata as JSON in EXIF ImageDescription for WebP
+    // PRIORITY 0: Check for MetaHub Save Node JSON in ImageDescription
     if (exifData.ImageDescription) {
       try {
         const imageDesc = typeof exifData.ImageDescription === 'string'
           ? exifData.ImageDescription
           : new TextDecoder('utf-8').decode(exifData.ImageDescription);
 
+        // Check for MetaHub Save Node JSON first (has specific markers)
         const metaHubData = tryParseMetaHubJson(imageDesc);
         if (metaHubData) {
           return metaHubData;
         }
-      } catch (e) {
-        // Not JSON or not MetaHub metadata, continue with normal parsing
+
+        // Check if ImageDescription contains a ComfyUI workflow JSON
+        // (strong indicators: class_type, last_node_id, nodes array, or workflow/prompt objects)
+        // This handles the case where ComfyUI stores its workflow directly in EXIF ImageDescription.
+        if (imageDesc.includes('"class_type"') ||
+            imageDesc.includes('"last_node_id"') ||
+            (imageDesc.includes('"nodes"') && imageDesc.includes('"links"')) ||
+            (imageDesc.includes('"workflow"') && imageDesc.includes('"inputs"'))) {
+          try {
+            // Strip known prefixes (e.g. "Workflow:{...}")
+            let jsonText = imageDesc;
+            if (!jsonText.startsWith('{')) {
+              const firstBrace = jsonText.indexOf('{');
+              if (firstBrace > 0) jsonText = jsonText.substring(firstBrace);
+            }
+            const parsed = JSON.parse(jsonText);
+            // Sanitize any NaN values that ComfyUI sometimes emits
+            if (typeof parsed.workflow === 'string') {
+              parsed.workflow = JSON.parse(sanitizeJson(parsed.workflow));
+            }
+            if (typeof parsed.prompt === 'string') {
+              parsed.prompt = JSON.parse(sanitizeJson(parsed.prompt));
+            }
+            // If this is a raw workflow graph (has nodes/links/last_node_id but no
+            // workflow/prompt wrapper), wrap it so downstream normalization detects it.
+            if (!parsed.workflow && !parsed.prompt &&
+                (parsed.last_node_id !== undefined || Array.isArray(parsed.nodes))) {
+              return { workflow: parsed } as ImageMetadata;
+            }
+            return parsed as ImageMetadata;
+          } catch {
+            // JSON parse failed; fall through to text-based detection below
+          }
+        }
+      } catch {
+        // Not JSON or not parseable, continue with normal parsing
       }
     }
 
-    // Fall back to regular JPEG parsing logic (UserComment, etc.)
-    // Reuse the JPEG parsing by reconstructing metadataText
+    // PRIORITY 1: Use XMP dc:description text if it contains richer AI metadata than EXIF
+    // XMP often has the full generation parameters while EXIF may have truncated versions
+    if (xmpMetadataText && (
+        xmpMetadataText.includes('Steps:') ||
+        xmpMetadataText.includes('Prompt:') ||
+        xmpMetadataText.includes('Negative prompt:') ||
+        xmpMetadataText.includes('Version: ComfyUI') ||
+        xmpMetadataText.includes('--v') ||
+        xmpMetadataText.includes('Guidance Scale:')
+    )) {
+      const metaHubFromXmp = tryParseMetaHubJson(xmpMetadataText);
+      if (metaHubFromXmp) {
+        return metaHubFromXmp;
+      }
+      if (xmpMetadataText.includes('Version: ComfyUI')) {
+        return { parameters: xmpMetadataText };
+      }
+      return { parameters: xmpMetadataText };
+    }
+
+    // Extract metadata text from EXIF fields
     let metadataText: string | Uint8Array | undefined =
       exifData.UserComment ||
       exifData.userComment ||
@@ -763,6 +1055,11 @@ export async function parseWebPMetadata(buffer: ArrayBuffer): Promise<ImageMetad
       exifData.Parameters ||
       exifData.Description ||
       null;
+
+    // If EXIF has no metadata text but we have XMP text, use XMP
+    if (!metadataText && xmpMetadataText) {
+      metadataText = xmpMetadataText;
+    }
 
     if (!metadataText) {
       return null;
@@ -782,6 +1079,12 @@ export async function parseWebPMetadata(buffer: ArrayBuffer): Promise<ImageMetad
       }
       const cleanedData = Array.from(metadataText.slice(startOffset)).filter(byte => byte !== 0x00);
       metadataText = new TextDecoder('utf-8').decode(new Uint8Array(cleanedData));
+    } else if (typeof metadataText !== 'string') {
+      metadataText = typeof metadataText === 'object' ? JSON.stringify(metadataText) : String(metadataText);
+    }
+
+    if (!metadataText) {
+      return null;
     }
 
     const metaHubFromText = tryParseMetaHubJson(metadataText);
@@ -789,13 +1092,128 @@ export async function parseWebPMetadata(buffer: ArrayBuffer): Promise<ImageMetad
       return metaHubFromText;
     }
 
+    // ── Apply same detection logic as JPEG parser ──
+
     // Check for ComfyUI first
     if (metadataText.includes('Version: ComfyUI')) {
       return { parameters: metadataText };
     }
 
-    // Check for A1111/other formats
-    return { parameters: metadataText };
+    // Draw Things XMP format detection
+    if (metadataText.includes('"lang":"x-default"') && metadataText.includes('"value":')) {
+      try {
+        const xmpData = JSON.parse(metadataText);
+        if (xmpData.value && typeof xmpData.value === 'string') {
+          const innerJson = xmpData.value;
+          if (innerJson.includes('"c":') && (innerJson.includes('"model":') || innerJson.includes('"sampler":') || innerJson.includes('"scale":'))) {
+            return { parameters: 'Draw Things ' + innerJson, userComment: innerJson };
+          }
+        }
+      } catch {
+        // Not valid JSON, continue
+      }
+    }
+
+    // A1111-style format detection
+    if (metadataText.includes('Civitai resources:') && metadataText.includes('Steps:')) {
+      return { parameters: metadataText };
+    }
+    if (metadataText.includes('Steps:') && metadataText.includes('Sampler:') && metadataText.includes('Model hash:')) {
+      return { parameters: metadataText };
+    }
+    if (metadataText.includes('Prompt:') && metadataText.includes('Steps:') && metadataText.includes('Sampler:') && !metadataText.includes('Model hash:')) {
+      return { parameters: metadataText };
+    }
+
+    // Midjourney
+    if (metadataText.includes('--v') || metadataText.includes('--ar') || metadataText.includes('--q') || metadataText.includes('--s') || metadataText.includes('Midjourney')) {
+      return { parameters: metadataText };
+    }
+
+    // Forge
+    if ((metadataText.includes('Forge') || metadataText.includes('Gradio')) &&
+        metadataText.includes('Steps:') && metadataText.includes('Sampler:') && metadataText.includes('Model hash:')) {
+      return { parameters: metadataText };
+    }
+
+    // Draw Things (iOS/Mac)
+    if (metadataText.includes('Guidance Scale:') && metadataText.includes('Steps:') && metadataText.includes('Sampler:') &&
+        !metadataText.includes('Model hash:') && !metadataText.includes('Forge') && !metadataText.includes('Gradio') &&
+        !metadataText.includes('DreamStudio') && !metadataText.includes('Stability AI') && !metadataText.includes('--niji')) {
+      const userComment: string | undefined =
+        typeof exifData.UserComment === 'string' && exifData.UserComment.includes('{')
+          ? exifData.UserComment
+          : undefined;
+      return { parameters: metadataText, userComment };
+    }
+
+    // Try to parse as JSON for SwarmUI, InvokeAI, ComfyUI, DALL-E, etc.
+    try {
+      const parsedMetadata = JSON.parse(metadataText);
+
+      const wrappedMetaHub = wrapMetaHubData(parsedMetadata);
+      if (wrappedMetaHub) {
+        return wrappedMetaHub;
+      }
+
+      if (parsedMetadata.c2pa_manifest ||
+          (parsedMetadata.exif_data && (parsedMetadata.exif_data['openai:dalle'] ||
+                                        parsedMetadata.exif_data.Software?.includes('DALL-E')))) {
+        return parsedMetadata;
+      }
+
+      if (parsedMetadata.sui_image_params) {
+        return parsedMetadata;
+      }
+
+      if (isInvokeAIMetadata(parsedMetadata)) {
+        return parsedMetadata;
+      } else if (isComfyUIMetadata(parsedMetadata)) {
+        return parsedMetadata;
+      } else {
+        return parsedMetadata;
+      }
+    } catch {
+      // JSON parsing failed - check for ComfyUI patterns in raw text
+      if (metadataText.includes('"workflow"') || metadataText.includes('"prompt"') ||
+          metadataText.includes('last_node_id') || metadataText.includes('class_type') ||
+          metadataText.includes('Version: ComfyUI')) {
+        try {
+          const workflowMatch = metadataText.match(/"workflow"\s*:\s*(\{[^}]*\}|\[[^\]]*\]|"[^"]*")/);
+          const promptMatch = metadataText.match(/"prompt"\s*:\s*(\{[^}]*\}|\[[^\]]*\]|"[^"]*")/);
+
+          const comfyMetadata: Partial<ComfyUIMetadata> = {};
+
+          if (workflowMatch) {
+            try {
+              comfyMetadata.workflow = JSON.parse(workflowMatch[1]);
+            } catch {
+              comfyMetadata.workflow = workflowMatch[1];
+            }
+          }
+
+          if (promptMatch) {
+            try {
+              comfyMetadata.prompt = JSON.parse(promptMatch[1]);
+            } catch {
+              comfyMetadata.prompt = promptMatch[1];
+            }
+          }
+
+          if (comfyMetadata.workflow || comfyMetadata.prompt) {
+            return comfyMetadata;
+          }
+
+          if (metadataText.includes('Version: ComfyUI')) {
+            return { parameters: metadataText };
+          }
+        } catch {
+          // Silent error - pattern matching failed
+        }
+      }
+
+      return null;
+    }
   } catch (e) {
     console.error('[WebP DEBUG] Error in parseWebPMetadata:', e);
     return null;
