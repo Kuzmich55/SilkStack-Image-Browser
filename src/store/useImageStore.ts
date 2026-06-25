@@ -26,6 +26,7 @@ const SIMILARITY_VERSION_KEY = 'similarityGroupVersion';
 // flags invisible to subsequent calls.
 let __syncInProgress = false;
 let __similaritySyncInProgress = false;
+let __similaritySyncQueued = false;
 
 // ── Undo stack (session-only) ───────────────────────────────────────────
 // Captures pre-merge annotation snapshots so Ctrl+Z can restore them.
@@ -3286,7 +3287,10 @@ export const useImageStore = create<ImageState>((set, get) => {
             const { images, annotations } = state;
 
             // Prevent concurrent runs (module-level guard — survives state updates)
-            if (__similaritySyncInProgress) return;
+            if (__similaritySyncInProgress) {
+                __similaritySyncQueued = true;
+                return;
+            }
 
             // Guard: do not run before annotations are loaded from IndexedDB.
             // Prevents the same race described in syncNewImagesToStacks.
@@ -3522,34 +3526,47 @@ export const useImageStore = create<ImageState>((set, get) => {
                 reportProgress(0, 1, 'Saving similarity groups...');
                 const now = Date.now();
                 const updatedAnnotations: ImageAnnotations[] = [];
-                const newAnnotations = new Map(currentAnnotations);
 
                 for (const [imageId, annotation] of currentAnnotations) {
                     const sgId = annotation.stackGroupId;
-                    const simId = sgId ? groupIdToSimId.get(sgId) : undefined;
+                    
+                    // Prevent silent unstacking of manually merged images.
+                    // If an image has no stackGroupId (e.g. manually unstacked),
+                    // the clustering engine should not forcefully remove its similarityGroupId.
+                    if (!sgId) continue;
+
+                    const simId = groupIdToSimId.get(sgId);
                     const targetId = simId || sgId;
 
                     if (annotation.similarityGroupId !== targetId) {
                         const updated = { ...annotation, similarityGroupId: targetId, updatedAt: now };
                         updatedAnnotations.push(updated);
-                        newAnnotations.set(imageId, updated);
                     }
                 }
 
                 if (updatedAnnotations.length > 0) {
                     await bulkSaveAnnotations(updatedAnnotations);
 
-                    const currentImages = get().images;
+                    // Fetch the freshest state to prevent overwriting concurrent user actions
                     const currentState = get();
-                    const imagesWithAnnotations = applyAnnotationsToImages(currentImages, newAnnotations);
-                    const filteredResult = filterAndSort({ ...currentState, images: imagesWithAnnotations, annotations: newAnnotations });
+                    const freshAnnotations = new Map(currentState.annotations);
+                    
+                    // Apply ONLY our specific updates to the fresh state
+                    for (const updated of updatedAnnotations) {
+                        // Merge with the freshest version of the annotation
+                        const current = freshAnnotations.get(updated.imageId) || updated;
+                        freshAnnotations.set(updated.imageId, { ...current, similarityGroupId: updated.similarityGroupId, updatedAt: now });
+                    }
+
+                    const imagesWithAnnotations = applyAnnotationsToImages(currentState.images, freshAnnotations);
+                    const filteredResult = filterAndSort({ ...currentState, images: imagesWithAnnotations, annotations: freshAnnotations });
                     const availableFilters = recalculateAvailableFilters(filteredResult.filteredImages);
 
                     set({
                         ...filteredResult,
                         ...availableFilters,
                         images: imagesWithAnnotations,
-                        annotations: newAnnotations,
+                        annotations: freshAnnotations,
                     });
 
                     console.log(`Similarity groups updated: ${newEntries.length} new prompts → ${updatedAnnotations.length} annotations changed`);
@@ -3559,6 +3576,11 @@ export const useImageStore = create<ImageState>((set, get) => {
                 reportProgress(0, 0, 'Similarity grouping failed');
             } finally {
                 __similaritySyncInProgress = false;
+                if (__similaritySyncQueued) {
+                    __similaritySyncQueued = false;
+                    console.log('[SimilarityGroups] Running queued similarity computation');
+                    setTimeout(() => get().computeSimilarityGroups(), 100);
+                }
                 // Clear progress after a short delay so the user sees completion
                 setTimeout(() => get().setSimilarityGroupProgress(null), 1500);
             }

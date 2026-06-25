@@ -2373,59 +2373,64 @@ export async function processFiles(
         }
 
         if (fallbackEntries.length > 0) {
-          const fallbackPaths = fallbackEntries
-            .map(entry => (entry.source?.handle as ElectronFileHandle)?._filePath)
-            .filter((path): path is string => typeof path === 'string' && path.length > 0);
-          if (fallbackPaths.length > 0) {
-            const fullReadStart = performance.now();
-            const fullReadResult = await (window as any).electronAPI.readFilesBatch(fallbackPaths);
-            const fullReadDuration = performance.now() - fullReadStart;
-            phaseBStats.fullReadFiles += fallbackPaths.length;
-            phaseBStats.fullReadMs += fullReadDuration;
-            phaseBStats.ipcCalls += 1;
+          const FALLBACK_BATCH_SIZE = 4;
+          const fallbackBatches = chunkArray(fallbackEntries, FALLBACK_BATCH_SIZE);
+          
+          for (const fallbackBatch of fallbackBatches) {
+            const fallbackPaths = fallbackBatch
+              .map(entry => (entry.source?.handle as ElectronFileHandle)?._filePath)
+              .filter((path): path is string => typeof path === 'string' && path.length > 0);
+            if (fallbackPaths.length > 0) {
+              const fullReadStart = performance.now();
+              const fullReadResult = await (window as any).electronAPI.readFilesBatch(fallbackPaths);
+              const fullReadDuration = performance.now() - fullReadStart;
+              phaseBStats.fullReadFiles += fallbackPaths.length;
+              phaseBStats.fullReadMs += fullReadDuration;
+              phaseBStats.ipcCalls += 1;
 
-            const fullDataMap = new Map<string, ArrayBuffer>();
-            if (fullReadResult.success && Array.isArray(fullReadResult.files)) {
-              for (const file of fullReadResult.files) {
-                if (!file.success || !file.data) {
-                  continue;
-                }
-                const raw = file.data as ArrayBuffer | ArrayBufferView;
-                if (raw instanceof ArrayBuffer) {
-                  fullDataMap.set(file.path, raw);
-                } else if (ArrayBuffer.isView(raw)) {
-                  const view = raw as ArrayBufferView;
-                  const copy = new Uint8Array(view.byteLength);
-                  copy.set(new Uint8Array(view.buffer, view.byteOffset, view.byteLength));
-                  fullDataMap.set(file.path, copy.buffer);
+              const fullDataMap = new Map<string, ArrayBuffer>();
+              if (fullReadResult.success && Array.isArray(fullReadResult.files)) {
+                for (const file of fullReadResult.files) {
+                  if (!file.success || !file.data) {
+                    continue;
+                  }
+                  const raw = file.data as ArrayBuffer | ArrayBufferView;
+                  if (raw instanceof ArrayBuffer) {
+                    fullDataMap.set(file.path, raw);
+                  } else if (ArrayBuffer.isView(raw)) {
+                    const view = raw as ArrayBufferView;
+                    const copy = new Uint8Array(view.byteLength);
+                    copy.set(new Uint8Array(view.buffer, view.byteOffset, view.byteLength));
+                    fullDataMap.set(file.path, copy.buffer);
+                  }
                 }
               }
+
+              const fallbackIterator = async (entry: CatalogEntryState) => {
+                if (!entry.source) {
+                  return null;
+                }
+                const filePath = (entry.source.handle as ElectronFileHandle)?._filePath;
+                if (!filePath) {
+                  missingEntries.add(entry.image.id);
+                  return null;
+                }
+                const buffer = fullDataMap.get(filePath);
+                if (!buffer) {
+                  missingEntries.add(entry.image.id);
+                  return null;
+                }
+                const shouldProfile = (profileCounter++ % profileSampleRate) === 0;
+                const profile = shouldProfile
+                  ? { totalMs: 0, parseMs: 0, normalizeMs: 0, dimensionsMs: 0 }
+                  : undefined;
+                const enriched = await processSingleFileOptimized(entry.source, directoryId, buffer, profile);
+                resultsById.set(entry.image.id, { enriched, profile });
+                return null;
+              };
+
+              await asyncPool(concurrencyLimit, fallbackBatch, fallbackIterator);
             }
-
-            const fallbackIterator = async (entry: CatalogEntryState) => {
-              if (!entry.source) {
-                return null;
-              }
-              const filePath = (entry.source.handle as ElectronFileHandle)?._filePath;
-              if (!filePath) {
-                missingEntries.add(entry.image.id);
-                return null;
-              }
-              const buffer = fullDataMap.get(filePath);
-              if (!buffer) {
-                missingEntries.add(entry.image.id);
-                return null;
-              }
-              const shouldProfile = (profileCounter++ % profileSampleRate) === 0;
-              const profile = shouldProfile
-                ? { totalMs: 0, parseMs: 0, normalizeMs: 0, dimensionsMs: 0 }
-                : undefined;
-              const enriched = await processSingleFileOptimized(entry.source, directoryId, buffer, profile);
-              resultsById.set(entry.image.id, { enriched, profile });
-              return null;
-            };
-
-            await asyncPool(concurrencyLimit, fallbackEntries, fallbackIterator);
           }
         }
 

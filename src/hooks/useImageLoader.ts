@@ -1459,8 +1459,12 @@ export function useImageLoader() {
         });
 
         if (newFiles.length === 0) {
-          return; // Todos os arquivos j├í foram indexados
+          return; // Todos os arquivos já foram indexados
         }
+
+        // --- Start indexing UI state ---
+        useImageStore.getState().setIndexingState("indexing");
+        useImageStore.getState().setProgress({ current: 0, total: newFiles.length });
 
         // Obter configura├º├úo de concorr├¬ncia
         const indexingConcurrency =
@@ -1527,7 +1531,7 @@ export function useImageLoader() {
         // Processar novos arquivos usando o pipeline existente
         const { phaseB } = await processFiles(
           fileEntries,
-          () => {}, // setProgress - silent
+          (progress) => useImageStore.getState().setProgress(progress),
           handleBatchProcessed,
           directory.id,
           directory.name,
@@ -1547,13 +1551,16 @@ export function useImageLoader() {
               );
               addImages(enrichedBatch);
               enrichedForCache.push(...enrichedBatch);
-              // Force flush imediatamente
-              const flushPendingImages =
-                useImageStore.getState().flushPendingImages;
-              setTimeout(() => {
-                log("[auto-watch] Flushing enriched images");
-                flushPendingImages();
-              }, 0);
+              // Debounce the massive flush operation so the UI thread doesn't freeze
+              // after every single 64-file batch
+              if ((window as any)._autoWatchFlushTimer) {
+                clearTimeout((window as any)._autoWatchFlushTimer);
+              }
+              (window as any)._autoWatchFlushTimer = setTimeout(() => {
+                log("[auto-watch] Flushing enriched images (debounced)");
+                useImageStore.getState().flushPendingImages();
+                (window as any)._autoWatchFlushTimer = null;
+              }, 1000);
             },
           },
         );
@@ -1562,6 +1569,14 @@ export function useImageLoader() {
         log("[auto-watch] Waiting for Phase B to complete...");
         await phaseB;
         log("[auto-watch] Phase B completed!");
+
+        // Ensure all pending images are flushed BEFORE triggering stacking
+        if ((window as any)._autoWatchFlushTimer) {
+          clearTimeout((window as any)._autoWatchFlushTimer);
+          (window as any)._autoWatchFlushTimer = null;
+          log("[auto-watch] Synchronously flushing remaining enriched images");
+          useImageStore.getState().flushPendingImages();
+        }
 
         // Trigger stacking analysis on newly watched images
         useImageStore.getState().syncNewImagesToStacks();
@@ -1580,6 +1595,9 @@ export function useImageLoader() {
         }
       } catch (error) {
         console.error("Error processing watched files:", error);
+      } finally {
+        useImageStore.getState().setIndexingState("idle");
+        useImageStore.getState().setProgress(null);
       }
     },
     [addImages],
