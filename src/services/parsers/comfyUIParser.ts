@@ -371,7 +371,7 @@ function extractComfyVersion(workflow: any, prompt: any): string | null {
   }
   
   // Try regex on combined text
-  const text = JSON.stringify(workflow) + JSON.stringify(prompt);
+  const text = JSON.stringify(workflow || {}) + JSON.stringify(prompt || {});
   const versionMatch = text.match(/"version"\s*:\s*"?([0-9]+\.[0-9]+\.[0-9]+)"?/);
   if (versionMatch) {
     return versionMatch[1];
@@ -751,6 +751,9 @@ function collectAllPossiblePrompts(graph: Graph): { positive: string[]; negative
     }
 
     // --- Tier 3: Any unclassified node with prompt-shaped widgets ---
+    // Exclude 'Note' and 'MarkdownNote' class types from being picked up as prompts
+    if (node.class_type.toLowerCase().includes('note')) continue;
+
     if (Array.isArray(node.widgets_values)) {
       for (const w of node.widgets_values) {
         if (typeof w === 'string' && w.length > 40 && w.includes(',')) {

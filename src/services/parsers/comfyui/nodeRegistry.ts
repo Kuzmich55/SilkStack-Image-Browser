@@ -341,12 +341,37 @@ export const NodeRegistry: Record<string, NodeDefinition> = {
     category: 'IO', roles: ['TRANSFORM'],
     inputs: { samples: { type: 'LATENT' }, vae: { type: 'VAE' }, },
     outputs: { IMAGE: { type: 'IMAGE' } },
-    param_mapping: { vae: { source: 'trace', input: 'vae' }, },
+    param_mapping: {
+      prompt: { source: 'trace', input: 'samples' },
+      negativePrompt: { source: 'trace', input: 'samples' },
+      seed: { source: 'trace', input: 'samples' },
+      steps: { source: 'trace', input: 'samples' },
+      cfg: { source: 'trace', input: 'samples' },
+      model: { source: 'trace', input: 'samples' },
+      sampler_name: { source: 'trace', input: 'samples' },
+      scheduler: { source: 'trace', input: 'samples' },
+      lora: { source: 'trace', input: 'samples' },
+      denoise: { source: 'trace', input: 'samples' },
+      vae: { source: 'trace', input: 'vae' }
+    },
     pass_through_rules: [{ from_input: 'samples', to_output: 'IMAGE' }]
   },
   SaveImageWithMetaData: {
     category: 'IO', roles: ['SINK'],
     inputs: { images: { type: 'IMAGE' } }, outputs: {},
+    param_mapping: {
+      prompt: { source: 'trace', input: 'images' },
+      negativePrompt: { source: 'trace', input: 'images' },
+      seed: { source: 'trace', input: 'images' },
+      steps: { source: 'trace', input: 'images' },
+      cfg: { source: 'trace', input: 'images' },
+      model: { source: 'trace', input: 'images' },
+      sampler_name: { source: 'trace', input: 'images' },
+      scheduler: { source: 'trace', input: 'images' },
+      vae: { source: 'trace', input: 'images' },
+      lora: { source: 'trace', input: 'images' },
+      denoise: { source: 'trace', input: 'images' }
+    },
     widget_order: ['filename_prefix', 'subdirectory_name', 'output_format', 'quality', 'metadata_scope', 'include_batch_num', 'prefer_nearest']
   },
 
@@ -355,7 +380,19 @@ export const NodeRegistry: Record<string, NodeDefinition> = {
     category: 'IO', roles: ['SINK'],
     inputs: { images: { type: 'IMAGE' } }, 
     outputs: {},
-    param_mapping: {},  // No direct params, but traverse inputs
+    param_mapping: {
+      prompt: { source: 'trace', input: 'images' },
+      negativePrompt: { source: 'trace', input: 'images' },
+      seed: { source: 'trace', input: 'images' },
+      steps: { source: 'trace', input: 'images' },
+      cfg: { source: 'trace', input: 'images' },
+      model: { source: 'trace', input: 'images' },
+      sampler_name: { source: 'trace', input: 'images' },
+      scheduler: { source: 'trace', input: 'images' },
+      vae: { source: 'trace', input: 'images' },
+      lora: { source: 'trace', input: 'images' },
+      denoise: { source: 'trace', input: 'images' }
+    },
     widget_order: ['filename_prefix']
   },
 
