@@ -56,6 +56,19 @@ const stringHash = (str: string) => {
   return hash;
 };
 
+// Hash with seed mixed in non-linearly at each step.
+// DJB2 is purely linear — appending/prepending the seed doesn't change relative
+// ordering for same-length IDs. XOR-ing the seed into each iteration makes the
+// hash non-separable so different seeds actually reorder the images.
+const hashWithSeed = (str: string, seed: number): number => {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash = (hash ^ seed) | 0;
+  }
+  return hash;
+};
+
 const sortItems = (
   items: StackItem[],
   sortOrder: 'asc' | 'desc' | 'date-asc' | 'date-desc' | 'random',
@@ -88,8 +101,8 @@ const sortItems = (
     }
     if (sortOrder === 'random') {
       const seed = randomSeed || 0;
-      const hashA = stringHash(imgA.id + seed.toString());
-      const hashB = stringHash(imgB.id + seed.toString());
+      const hashA = hashWithSeed(imgA.id, seed);
+      const hashB = hashWithSeed(imgB.id, seed);
       if (hashA !== hashB) return hashA - hashB;
       return compareById(imgA, imgB);
     }

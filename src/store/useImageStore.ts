@@ -1076,13 +1076,26 @@ export const useImageStore = create<ImageState>((set, get) => {
             return hash;
         };
 
+        // Hash string with a seed, mixing it non-linearly at each step.
+        // DJB2 is purely linear: stringHash(a + suffix) - stringHash(b + suffix) ≈
+        // (stringHash(a) - stringHash(b)) * 33^len(suffix), so appending or prepending
+        // the seed doesn't change the relative ordering for same-length IDs.
+        // By XOR-ing the seed into each iteration the hash becomes non-separable
+        // (hash(str,S) ≠ f(S) + g(str)), guaranteeing different seeds reorder images.
+        const hashWithSeed = (str: string, seed: number): number => {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                hash = ((hash << 5) - hash) + str.charCodeAt(i);
+                hash = (hash ^ seed) | 0; // XOR seed non-linearly at each step
+            }
+            return hash;
+        };
+
         const compareRandom = (a: IndexedImage, b: IndexedImage) => {
-            // Combine image ID with state.randomSeed to create a stable sort key for this seed
-            // We use the stringHash of the ID + seed to get a pseudo-random value fixed for this session/seed
             const seed = state.randomSeed || 0;
-            const hashA = stringHash(a.id + seed.toString());
-            const hashB = stringHash(b.id + seed.toString());
-            
+            const hashA = hashWithSeed(a.id, seed);
+            const hashB = hashWithSeed(b.id, seed);
+
             if (hashA !== hashB) {
                 return hashA - hashB;
             }
