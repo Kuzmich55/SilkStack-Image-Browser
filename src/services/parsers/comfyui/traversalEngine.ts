@@ -93,10 +93,14 @@ function traverse(
 
   // 4. Travessia Estática (PASS_THROUGH / TRANSFORM)
   if (nodeDef.roles.includes('PASS_THROUGH') || nodeDef.roles.includes('TRANSFORM')) {
-    // Procura por entradas que correspondam ao tipo de dado esperado para continuar a cadeia
-    for (const inputName in nodeDef.inputs) {
+    // Procura por entradas ordenadas via pass_through_rules ou pelas chaves de inputs
+    const inputNames = nodeDef.pass_through_rules 
+        ? nodeDef.pass_through_rules.map(rule => rule.from_input) 
+        : Object.keys(nodeDef.inputs);
+
+    for (const inputName of inputNames) {
       const inputDef = nodeDef.inputs[inputName];
-      if (inputDef.type === state.expectedType || inputDef.type === 'ANY') {
+      if (inputDef && (inputDef.type === state.expectedType || inputDef.type === 'ANY')) {
         const inputLink = currentNode.inputs[inputName];
         if (inputLink && Array.isArray(inputLink)) {
            const result = traverseFromLink(inputLink as NodeLink, state, graph, accumulator);
@@ -167,7 +171,7 @@ function extractValue(node: ParserNode, rule: ParamMappingRule, state: Traversal
     }
     
     if (rule.source === 'trace') {
-        const inputLink = node.inputs[rule.input];
+        const inputLink = node.inputs?.[rule.input];
         if (inputLink && Array.isArray(inputLink)) {
             return traverseFromLink(inputLink as NodeLink, state, graph, accumulator);
         }

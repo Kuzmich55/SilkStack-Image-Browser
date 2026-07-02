@@ -188,8 +188,11 @@ export const NodeRegistry: Record<string, NodeDefinition> = {
         extractor: (node, state, graph, traverse) => {
           // If text comes from a link (like String Literal), trace it
           const textInput = node.inputs?.text;
+          console.log(`[DEBUG] CLIPTextEncode extractor textInput:`, textInput);
           if (textInput && Array.isArray(textInput)) {
-            return traverse(textInput as any, { ...state, targetParam: 'prompt' }, graph, []);
+            const result = traverse(textInput as any, { ...state, targetParam: 'prompt' }, graph, []);
+            console.log(`[DEBUG] CLIPTextEncode traverse returned:`, result);
+            if (result) return result;
           }
           // If text is a direct value in inputs, use it
           if (textInput && typeof textInput === 'string') {
@@ -327,7 +330,8 @@ export const NodeRegistry: Record<string, NodeDefinition> = {
   'String Literal': {
     category: 'UTILS', roles: ['SOURCE'],
     inputs: { string: { type: 'STRING' } }, outputs: { STRING: { type: 'STRING' } },
-    param_mapping: { prompt: { source: 'input', key: 'string' }, negativePrompt: { source: 'input', key: 'string' }, },
+    param_mapping: { prompt: { source: 'widget', key: 'string' }, negativePrompt: { source: 'widget', key: 'string' }, },
+    widget_order: ['string']
   },
   PrimitiveStringMultiline: {
     category: 'UTILS',
@@ -335,8 +339,8 @@ export const NodeRegistry: Record<string, NodeDefinition> = {
     inputs: { value: { type: 'STRING' } },
     outputs: { STRING: { type: 'STRING' } },
     param_mapping: {
-      prompt: { source: 'input', key: 'value' },
-      negativePrompt: { source: 'input', key: 'value' },
+      prompt: { source: 'widget', key: 'value' },
+      negativePrompt: { source: 'widget', key: 'value' },
     },
     widget_order: ['value']
   },
@@ -604,6 +608,48 @@ export const NodeRegistry: Record<string, NodeDefinition> = {
     param_mapping: {},
     pass_through_rules: [{ from_input: 'clip', to_output: 'CLIP' }],
     widget_order: ['mean_pool', 'return_tokens']
+  },
+
+  ComfySwitchNode: {
+    category: 'ROUTING', roles: ['ROUTING'],
+    inputs: { switch: { type: 'BOOLEAN' }, on_true: { type: 'ANY' }, on_false: { type: 'ANY' } },
+    outputs: { output: { type: 'ANY' } },
+    conditional_routing: {
+        control_input: 'switch',
+        dynamic_input_prefix: 'on_'
+    }
+  },
+
+  PrimitiveBoolean: {
+    category: 'UTILS', roles: ['SOURCE'],
+    inputs: { value: { type: 'BOOLEAN' } },
+    outputs: { BOOLEAN: { type: 'BOOLEAN' } },
+    param_mapping: { steps: { source: 'widget', key: 'value' } },
+    widget_order: ['value']
+  },
+
+  PreviewAny: {
+    category: 'UTILS', roles: ['PASS_THROUGH'],
+    inputs: { source: { type: 'ANY' } },
+    outputs: { '*': { type: 'ANY' } },
+    param_mapping: {},
+    pass_through_rules: [{ from_input: 'source', to_output: '*' }]
+  },
+
+  TextGenerate: {
+    category: 'TRANSFORM', roles: ['PASS_THROUGH'],
+    inputs: { prompt: { type: 'ANY' } },
+    outputs: { generated_text: { type: 'STRING' } },
+    param_mapping: { prompt: { source: 'trace', input: 'prompt' } },
+    pass_through_rules: [{ from_input: 'prompt', to_output: 'generated_text' }]
+  },
+
+  StringConcatenate: {
+    category: 'UTILS', roles: ['PASS_THROUGH'],
+    inputs: { string_a: { type: 'ANY' }, string_b: { type: 'ANY' } },
+    outputs: { STRING: { type: 'STRING' } },
+    param_mapping: {},
+    pass_through_rules: [{ from_input: 'string_b', to_output: 'STRING' }] // Prefer string_b (often user prompt over system prompt)
   },
 
   ScaledFP8HybridUNetLoader: {

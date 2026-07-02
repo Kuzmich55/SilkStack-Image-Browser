@@ -886,7 +886,11 @@ export function resolvePromptFromGraph(workflow: any, prompt: any): Record<strin
     }
   }
 
+  console.log("[DEBUG] Graph nodes:", Object.keys(graph));
+
   const terminalNode = findTerminalNode(graph);
+
+  console.log(`[DEBUG] Terminal node found: ${terminalNode?.id} (${terminalNode?.class_type})`);
 
   // Check if terminal node was found
   if (!terminalNode) {
@@ -899,6 +903,7 @@ export function resolvePromptFromGraph(workflow: any, prompt: any): Record<strin
     graph: graph,
     params: ['prompt', 'negativePrompt', 'seed', 'steps', 'cfg', 'model', 'sampler_name', 'scheduler', 'lora', 'vae', 'denoise']
   });
+  console.log(`[DEBUG] resolveAll results:`, results);
 
   // --- TIER 2 FALLBACK: Global graph scanner ---
   // If standard traversal failed to find a prompt, use the global graph scanner
