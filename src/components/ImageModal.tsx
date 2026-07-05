@@ -2,6 +2,7 @@ import React, { useEffect, useState, FC, useCallback, useRef } from "react";
 import { type IndexedImage, type BaseMetadata, type LoRAInfo } from "../types";
 import { FileOperations } from "../services/fileOperations";
 import { copyImageToClipboard, showInExplorer, openInNativeViewer, getAspectRatio } from "../utils/imageUtils";
+import { extractRawMetadataFromFile } from "../services/fileIndexer";
 import {
   Copy,
   Pencil,
@@ -479,7 +480,11 @@ const ImageModal: React.FC<ImageModalProps> = ({
   const [newName, setNewName] = useState(
     image.name.replace(/\.(png|jpg|jpeg|webp|mp4|webm|mkv|mov|avi)$/i, ""),
   );
-  const [showRawMetadata, setShowRawMetadata] = useState(false);
+  const [metadataViewMode, setMetadataViewMode] = useState<
+    "parsed" | "json" | "fulljson"
+  >("parsed");
+  const [fullRawMetadata, setFullRawMetadata] = useState<any>(null);
+  const [isLoadingFullJson, setIsLoadingFullJson] = useState(false);
 
   // ... (rest of the component state)
 
@@ -1255,6 +1260,45 @@ const ImageModal: React.FC<ImageModalProps> = ({
         .slice(0, 5)
     : [];
 
+  // Fetch raw metadata from file when "Full JSON" is clicked
+  const handleLoadFullJson = useCallback(async () => {
+    if (metadataViewMode === "fulljson") {
+      setMetadataViewMode("parsed");
+      return;
+    }
+    setMetadataViewMode("fulljson");
+    if (!fullRawMetadata && directoryPath) {
+      setIsLoadingFullJson(true);
+      try {
+        const [, relPath] = image.id.split("::");
+        const filePath = relPath || image.name;
+        let fullPath = `${directoryPath}/${filePath}`;
+        // Use Electron's safe path joining when available
+        if (window.electronAPI?.joinPaths) {
+          const result = await window.electronAPI.joinPaths(
+            directoryPath,
+            filePath,
+          );
+          if (result.success && result.path) {
+            fullPath = result.path;
+          }
+        }
+        const raw = await extractRawMetadataFromFile(fullPath);
+        setFullRawMetadata(raw);
+      } catch (e) {
+        console.error("Failed to load raw metadata:", e);
+      } finally {
+        setIsLoadingFullJson(false);
+      }
+    }
+  }, [
+    metadataViewMode,
+    fullRawMetadata,
+    directoryPath,
+    image.id,
+    image.name,
+  ]);
+
   return (
     <div
       className={`${
@@ -1972,19 +2016,61 @@ const ImageModal: React.FC<ImageModalProps> = ({
               <h3 className="font-semibold text-lg flex items-center gap-2">
                 Generation Data
               </h3>
-              <div className="flex gap-2">
+              <div className="flex gap-3">
                 <button
-                  onClick={() => setShowRawMetadata(!showRawMetadata)}
-                  className="text-xs text-gray-400 hover:text-gray-50 underline"
+                  onClick={() =>
+                    setMetadataViewMode(
+                      metadataViewMode === "json" ? "parsed" : "json",
+                    )
+                  }
+                  className={`text-xs hover:text-gray-50 underline transition-colors ${
+                    metadataViewMode === "json"
+                      ? "text-blue-400"
+                      : "text-gray-400"
+                  }`}
                 >
-                  {showRawMetadata ? "Show Parsed" : "Show JSON"}
+                  {metadataViewMode === "json" ? "Show Parsed" : "JSON"}
+                </button>
+                <button
+                  onClick={handleLoadFullJson}
+                  className={`text-xs hover:text-gray-50 underline transition-colors ${
+                    metadataViewMode === "fulljson"
+                      ? "text-blue-400"
+                      : "text-gray-400"
+                  }`}
+                >
+                  {metadataViewMode === "fulljson"
+                    ? "Show Parsed"
+                    : "Full JSON"}
                 </button>
               </div>
             </div>
-            {showRawMetadata && (
+            {metadataViewMode === "json" && (
               <pre className="bg-black/50 p-2 rounded-lg text-xs text-gray-300 whitespace-pre-wrap break-all max-h-64 overflow-y-auto mt-2">
-                {JSON.stringify(image.metadata, null, 2)}
+                {JSON.stringify(
+                  image.metadata?.normalizedMetadata,
+                  null,
+                  2,
+                )}
               </pre>
+            )}
+            {metadataViewMode === "fulljson" && (
+              <>
+                {isLoadingFullJson ? (
+                  <div className="bg-black/50 p-4 rounded-lg text-xs text-gray-400 text-center mt-2 animate-pulse">
+                    Loading raw metadata from file...
+                  </div>
+                ) : fullRawMetadata ? (
+                  <pre className="bg-black/50 p-2 rounded-lg text-xs text-gray-300 whitespace-pre-wrap break-all max-h-64 overflow-y-auto mt-2">
+                    {JSON.stringify(fullRawMetadata, null, 2)}
+                  </pre>
+                ) : (
+                  <div className="bg-yellow-900/50 border border-yellow-700 text-yellow-300 px-3 py-2 rounded-lg text-xs mt-2">
+                    Unable to load raw metadata. The file may not contain
+                    embedded metadata, or the format is not supported.
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
