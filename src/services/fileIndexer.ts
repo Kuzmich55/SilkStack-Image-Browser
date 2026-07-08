@@ -421,7 +421,7 @@ async function parsePNGMetadata(buffer: ArrayBuffer): Promise<ImageMetadata | nu
         shouldTryExif = true;
       }
       
-      if (['invokeai_metadata', 'parameters', 'Parameters', 'workflow', 'prompt', 'Description'].includes(keyword) && text) {
+      if (['invokeai_metadata', 'parameters', 'workflow', 'prompt', 'description', 'imagemetahub_data'].includes(keyword.toLowerCase()) && text) {
         chunks[keyword.toLowerCase()] = text;
         foundChunks++;
       }
@@ -437,7 +437,7 @@ async function parsePNGMetadata(buffer: ArrayBuffer): Promise<ImageMetadata | nu
         shouldTryExif = true;
       }
 
-      if (['invokeai_metadata', 'parameters', 'Parameters', 'workflow', 'prompt', 'Description', 'imagemetahub_data'].includes(keyword)) {
+      if (['invokeai_metadata', 'parameters', 'workflow', 'prompt', 'description', 'imagemetahub_data'].includes(keyword.toLowerCase())) {
         const compressionFlag = chunkData[keywordEndIndex + 1];
         let currentIndex = keywordEndIndex + 3; // Skip null separator, compression flag, and method
 
@@ -1214,6 +1214,40 @@ if (rawMetadata) {
       vae: resolvedParams.vae || resolvedParams.vaes?.[0]?.name,
       denoise: resolvedParams.denoise,
     };
+  }
+
+  // Priority 2.5: ComfyUI API prompt-only data (no workflow chunk)
+  // Some ComfyUI exports only embed the API prompt JSON in the "prompt"
+  // text chunk — without a separate "workflow" chunk. Detect this by
+  // checking whether the prompt value looks like ComfyUI node data.
+  if (!normalizedMetadata && !('workflow' in rawMetadata) && 'prompt' in rawMetadata) {
+    const promptVal = (rawMetadata as any).prompt;
+    if (typeof promptVal === 'string' &&
+        promptVal.includes('"class_type"') &&
+        promptVal.includes('"inputs"')) {
+      try {
+        const promptObj = JSON.parse(promptVal);
+        const resolvedParams = resolvePromptFromGraph(undefined, promptObj);
+        normalizedMetadata = {
+          prompt: resolvedParams.prompt || '',
+          negativePrompt: resolvedParams.negativePrompt || '',
+          model: resolvedParams.model || '',
+          models: resolvedParams.model ? [resolvedParams.model] : [],
+          width: 0,
+          height: 0,
+          seed: resolvedParams.seed,
+          steps: resolvedParams.steps || 0,
+          cfg_scale: resolvedParams.cfg,
+          scheduler: resolvedParams.scheduler || '',
+          sampler: resolvedParams.sampler_name || '',
+          loras: Array.isArray(resolvedParams.lora) ? resolvedParams.lora : (resolvedParams.lora ? [resolvedParams.lora] : []),
+          vae: resolvedParams.vae || resolvedParams.vaes?.[0]?.name,
+          denoise: resolvedParams.denoise,
+        };
+      } catch (e) {
+        console.error('[FileIndexer] Failed to parse ComfyUI prompt-only JSON:', e);
+      }
+    }
   }
 
   // Priority 3: SwarmUI (has unique 'sui_image_params' structure)

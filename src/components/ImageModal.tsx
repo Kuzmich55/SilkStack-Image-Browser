@@ -2047,11 +2047,7 @@ const ImageModal: React.FC<ImageModalProps> = ({
             </div>
             {metadataViewMode === "json" && (
               <pre className="bg-black/50 p-2 rounded-lg text-xs text-gray-300 whitespace-pre-wrap break-all max-h-64 overflow-y-auto mt-2">
-                {JSON.stringify(
-                  image.metadata?.normalizedMetadata,
-                  null,
-                  2,
-                )}
+                {JSON.stringify(image.metadata, null, 2)}
               </pre>
             )}
             {metadataViewMode === "fulljson" && (

@@ -687,14 +687,21 @@ function collectTextFromNodeDeep(
  *  Tier 3 — Any other node whose widgets_values contain something prompt-shaped
  */
 function collectAllPossiblePrompts(graph: Graph): { positive: string[]; negative: string[] } {
-  const positive: string[] = [];
-  const negative: string[] = [];
+  // CLIPTextEncode is the canonical prompt carrier — its text is always the
+  // intended generation prompt. Other text-source nodes (PrimitiveStringMultiline,
+  // etc.) may contain system prompts, templates, or helper strings that are much
+  // longer but are NOT the image prompt. Keep them in separate buckets so we can
+  // prefer CLIPTextEncode results.
+  const clipPositive: string[] = [];
+  const clipNegative: string[] = [];
+  const otherPositive: string[] = [];
+  const otherNegative: string[] = [];
 
   for (const nodeId in graph) {
     const node = graph[nodeId];
     if (!node.class_type || node.mode === 2 || node.mode === 4) continue;
 
-    // --- Tier 1: CLIPTextEncode / Flux nodes ---
+    // --- Tier 1: CLIPTextEncode / Flux nodes (HIGHEST PRIORITY) ---
     if (node.class_type.includes('CLIPTextEncode')) {
       // Try the text input first (may be a link)
       const textInput = node.inputs?.text;
@@ -728,17 +735,17 @@ function collectAllPossiblePrompts(graph: Graph): { positive: string[]; negative
         const isLikelyNegative = lower.includes('blurry') || lower.includes('bad quality') ||
           lower.includes('lowres') || lower.includes('watermark') ||
           lower.includes('bad anatomy') || lower.includes('worst quality');
-        if (isLikelyNegative) negative.push(text);
-        else positive.push(text);
+        if (isLikelyNegative) clipNegative.push(text);
+        else clipPositive.push(text);
       }
     }
 
-    // --- Tier 2: Known text-source node types ---
+    // --- Tier 2: Known text-source node types (LOWER PRIORITY) ---
     if (TEXT_SOURCE_NODE_TYPES.has(node.class_type)) {
       // Try deep collection (handles linked inputs through concat chains)
       const deepText = collectTextFromNodeDeep(node, graph);
       if (deepText && deepText.length > 3) {
-        positive.push(deepText);
+        otherPositive.push(deepText);
         continue;
       }
 
@@ -746,7 +753,7 @@ function collectAllPossiblePrompts(graph: Graph): { positive: string[]; negative
       const shallow = node.widgets_values?.[0] || node.inputs?.text ||
         node.inputs?.string || node.inputs?.value;
       if (typeof shallow === 'string' && shallow.length > 5) {
-        positive.push(shallow);
+        otherPositive.push(shallow);
       }
     }
 
@@ -757,19 +764,35 @@ function collectAllPossiblePrompts(graph: Graph): { positive: string[]; negative
     if (Array.isArray(node.widgets_values)) {
       for (const w of node.widgets_values) {
         if (typeof w === 'string' && w.length > 40 && w.includes(',')) {
-          positive.push(w);
+          otherPositive.push(w);
           break;
         }
       }
     }
   }
 
-  return { positive, negative };
+  // Prefer CLIPTextEncode results — they are the canonical prompt source.
+  // Only fall back to other text sources (PrimitiveStringMultiline, etc.)
+  // if no CLIPTextEncode text was found.
+  return {
+    positive: clipPositive.length > 0 ? clipPositive : otherPositive,
+    negative: clipNegative.length > 0 ? clipNegative : otherNegative,
+  };
 }
 
 function selectBestFallbackPrompt(candidates: string[]): string | null {
   if (candidates.length === 0) return null;
-  // Pick the longest string as it's likely the actual prompt
+  if (candidates.length === 1) return candidates[0];
+
+  // Prefer structured JSON prompts (e.g. Ideogram 4.0 captions) over
+  // plain-text prompts — they're more specific and less likely to be
+  // helper/template text that happened to end up in the candidate list.
+  const jsonCandidate = candidates.find(c => {
+    try { JSON.parse(c); return true; } catch { return false; }
+  });
+  if (jsonCandidate) return jsonCandidate;
+
+  // Fall back to the longest candidate
   return candidates.sort((a, b) => b.length - a.length)[0];
 }
 
@@ -868,13 +891,24 @@ function deepPromptReconstructor(
  * Ponto de entrada principal. Resolve todos os parâmetros de metadados de um grafo.
  */
 export function resolvePromptFromGraph(workflow: any, prompt: any): Record<string, any> {
+  // Parse string inputs — ComfyUI PNG metadata stores workflow/prompt as
+  // JSON strings inside the metadata object (same as resolveWorkflowFactsFromGraph).
+  let parsedWorkflow = workflow;
+  let parsedPrompt = prompt;
+  if (typeof parsedWorkflow === 'string') {
+    try { parsedWorkflow = JSON.parse(parsedWorkflow); } catch { /* keep as-is */ }
+  }
+  if (typeof parsedPrompt === 'string') {
+    try { parsedPrompt = JSON.parse(parsedPrompt); } catch { /* keep as-is */ }
+  }
+
   const telemetry = {
     detection_method: 'standard',
     unknown_nodes_count: 0,
     warnings: [] as string[],
   };
 
-  const graph = createNodeMap(workflow, prompt);
+  const graph = createNodeMap(parsedWorkflow, parsedPrompt);
 
   // Count unknown nodes for telemetry
   for (const nodeId in graph) {
@@ -886,11 +920,7 @@ export function resolvePromptFromGraph(workflow: any, prompt: any): Record<strin
     }
   }
 
-  console.log("[DEBUG] Graph nodes:", Object.keys(graph));
-
   const terminalNode = findTerminalNode(graph);
-
-  console.log(`[DEBUG] Terminal node found: ${terminalNode?.id} (${terminalNode?.class_type})`);
 
   // Check if terminal node was found
   if (!terminalNode) {
@@ -903,7 +933,6 @@ export function resolvePromptFromGraph(workflow: any, prompt: any): Record<strin
     graph: graph,
     params: ['prompt', 'negativePrompt', 'seed', 'steps', 'cfg', 'model', 'sampler_name', 'scheduler', 'lora', 'vae', 'denoise']
   });
-  console.log(`[DEBUG] resolveAll results:`, results);
 
   // --- TIER 2 FALLBACK: Global graph scanner ---
   // If standard traversal failed to find a prompt, use the global graph scanner
@@ -937,32 +966,60 @@ export function resolvePromptFromGraph(workflow: any, prompt: any): Record<strin
     }
   }
 
+  // --- SAFEGUARD: If the prompt is not a string (e.g. the parser returned
+  // the raw API prompt object), forcibly re-extract from CLIPTextEncode nodes.
+  // This prevents the entire node graph from being serialized as the "prompt".
+  if (results.prompt && typeof results.prompt !== 'string') {
+    telemetry.warnings.push(
+      `Prompt was non-string (${typeof results.prompt}) — forcibly re-extracting from CLIPTextEncode`,
+    );
+    const fallback = collectAllPossiblePrompts(graph);
+    const bestPositive = selectBestFallbackPrompt(fallback.positive);
+    results.prompt = bestPositive || '';
+  }
+
   // Post-processing: deduplicate arrays BEFORE cleaning prompts
   if (results.lora && Array.isArray(results.lora)) {
     // Remove duplicates while preserving order of first appearance
     results.lora = Array.from(new Set(results.lora));
   }
 
-  // Fix duplicated prompts - check if prompt contains repeated segments
+  // Clean up extracted prompt text
   if (results.prompt && typeof results.prompt === 'string') {
-    // 1. Deduplicate comma-separated segments
-    const segments = results.prompt.split(/,\s*/).filter(s => s.trim());
-    const uniqueSegments = Array.from(new Set(segments));
-    if (uniqueSegments.length < segments.length) {
-      results.prompt = uniqueSegments.join(', ');
+    // Detect if the prompt is structured JSON (e.g. Ideogram 4.0 captions).
+    // JSON prompts must be preserved as-is — collapsing whitespace would
+    // destroy their syntax and make them unparseable.
+    let isJsonPrompt = false;
+    try {
+      JSON.parse(results.prompt);
+      isJsonPrompt = true;
+    } catch {
+      // Not JSON — apply normal natural-language cleanup below
     }
-    
-    // 2. Normalize newlines and multiple spaces to a single space
-    results.prompt = results.prompt.replace(/\n+/g, ' ').replace(/  +/g, ' ').replace(/\.$/, '').trim();
-    
-    // 3. Additional check: if the entire prompt is literally repeated (e.g., "abc abc")
-    const words = results.prompt.split(/\s+/);
-    const half = Math.floor(words.length / 2);
-    if (words.length >= 4 && words.length % 2 === 0) {
-      const firstHalf = words.slice(0, half).join(' ');
-      const secondHalf = words.slice(half).join(' ');
-      if (firstHalf === secondHalf && firstHalf.length > 0) {
-        results.prompt = firstHalf;
+
+    if (isJsonPrompt) {
+      // Preserve JSON structure; only trim surrounding whitespace
+      results.prompt = results.prompt.trim();
+    } else {
+      // 1. Deduplicate comma-separated segments
+      const segments = results.prompt.split(/,\s*/).filter(s => s.trim());
+      const uniqueSegments = Array.from(new Set(segments));
+      if (uniqueSegments.length < segments.length) {
+        results.prompt = uniqueSegments.join(', ');
+      }
+
+      // 2. Normalize newlines and multiple spaces to a single space
+      results.prompt = results.prompt.replace(/\n+/g, ' ').replace(/  +/g, ' ').replace(/\.$/, '').trim();
+
+      // 3. Additional check: if the entire prompt is literally repeated (e.g., "abc abc")
+      const words = results.prompt.split(/\s+/);
+      const half = Math.floor(words.length / 2);
+      if (words.length >= 4 && words.length % 2 === 0) {
+        const firstHalf = words.slice(0, half).join(' ');
+        const secondHalf = words.slice(half).join(' ');
+        if (firstHalf === secondHalf && firstHalf.length > 0) {
+          results.prompt = firstHalf;
+        }
       }
     }
   }
