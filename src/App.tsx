@@ -140,7 +140,7 @@ export default function App() {
   const reshuffle = useImageStore((state) => state.reshuffle);
   const updateDirectoryStatus = useImageStore((state) => state.updateDirectoryStatus);
   const restoreSmartLibraryCache = useImageStore((state) => state.restoreSmartLibraryCache);
-  const syncNewImagesToStacks = useImageStore((state) => state.syncNewImagesToStacks);
+  const processPostIndexingPipeline = useImageStore((state) => state.processPostIndexingPipeline);
   const handleStackImageDeletion = useImageStore((state) => state.handleStackImageDeletion);
   const mergeSelectedToStack = useImageStore((state) => state.mergeSelectedToStack);
   const unmergeSelectedFromStack = useImageStore((state) => state.unmergeSelectedFromStack);
@@ -245,9 +245,9 @@ export default function App() {
         'color: #4ade80; font-weight: bold', 'color: inherit');
       // Reload annotations from IndexedDB (now cleared)
       await useImageStore.getState().loadAnnotations();
-      // Trigger full re-processing: syncNewImagesToStacks assigns stackGroupId,
-      // then automatically schedules computeSimilarityGroups.
-      await useImageStore.getState().syncNewImagesToStacks();
+      // Trigger full re-processing via unified pipeline:
+      // stacking → similarity, running sequentially.
+      await useImageStore.getState().processPostIndexingPipeline();
     };
   }, []);
 
@@ -272,15 +272,19 @@ export default function App() {
     }
   }, [primaryPath, hasImages, indexingState, scanSubfolders, restoreSmartLibraryCache]);
 
-  // After indexing completes, sync new images to persistent library stacks
-  const prevIndexingStateRef = useRef(indexingState);
+  // Unified post-indexing pipeline: when BOTH annotations are loaded AND
+  // indexing is idle (either completed or never started), run the sequential
+  // processing pipeline (stacking → similarity) for any images that need it.
+  // Unlike the old one-shot indexingState transition, this check is
+  // persistent — if annotations load after indexing, the pipeline fires
+  // when both conditions are met.
+  const pipelineStartedRef = useRef(false);
   useEffect(() => {
-    const justCompleted = prevIndexingStateRef.current === 'indexing' && indexingState === 'completed';
-    prevIndexingStateRef.current = indexingState;
-    if (justCompleted) {
-      syncNewImagesToStacks();
+    if (isAnnotationsLoaded && indexingState === 'idle' && !pipelineStartedRef.current) {
+      pipelineStartedRef.current = true;
+      processPostIndexingPipeline();
     }
-  }, [indexingState, syncNewImagesToStacks]);
+  }, [isAnnotationsLoaded, indexingState, processPostIndexingPipeline]);
 
   // --- Effects ---
   useEffect(() => {
@@ -501,8 +505,8 @@ export default function App() {
       // Processar novos arquivos usando a função do useImageLoader
       await processNewWatchedFiles(directory, files);
 
-      // Sync new images into persistent library stacks
-      useImageStore.getState().syncNewImagesToStacks();
+      // Run unified post-indexing pipeline (stacking → similarity)
+      useImageStore.getState().processPostIndexingPipeline();
     });
 
     return () => unsubscribe();

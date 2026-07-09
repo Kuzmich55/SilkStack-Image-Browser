@@ -634,8 +634,8 @@ export function useImageLoader() {
       }
 
       scheduleGlobalFilterRefresh(true);
-      // Trigger stacking analysis on newly indexed images
-      useImageStore.getState().syncNewImagesToStacks();
+      // Trigger unified post-indexing pipeline (stacking → similarity)
+      useImageStore.getState().processPostIndexingPipeline();
       if (!suppressIndexingState) {
         setLoading(false);
         setIndexingState("completed");
@@ -1578,8 +1578,8 @@ export function useImageLoader() {
           useImageStore.getState().flushPendingImages();
         }
 
-        // Trigger stacking analysis on newly watched images
-        useImageStore.getState().syncNewImagesToStacks();
+        // Trigger unified post-indexing pipeline (stacking → similarity)
+        useImageStore.getState().processPostIndexingPipeline();
 
         if (getIsElectron() && enrichedForCache.length > 0) {
           try {

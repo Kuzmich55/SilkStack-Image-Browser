@@ -960,6 +960,7 @@ export interface IndexedImage {
 
   // Similarity-based stacking (computed post-indexing, persisted in IndexedDB)
   similarityGroupId?: string; // Similarity group ID — groups images with similar prompts
+  isSimilarityAnalyzed?: boolean; // Whether similarity grouping has been computed for this image
 }
 
 /**
@@ -976,6 +977,7 @@ export interface ImageAnnotations {
   stackGroupId?: string; // Prompt hash — groups images with identical prompts into stacks
   isStackAnalyzed?: boolean; // Whether the image has been checked for stack membership
   similarityGroupId?: string; // Similarity group ID — groups images with similar prompts (computed post-indexing)
+  isSimilarityAnalyzed?: boolean; // Whether similarity grouping has been computed for this image
   addedAt: number; // Timestamp when first annotated
   updatedAt: number; // Timestamp of last update
 }

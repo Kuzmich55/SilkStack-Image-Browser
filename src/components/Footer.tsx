@@ -67,13 +67,14 @@ const Footer: React.FC<FooterProps> = ({
   const isStackingEnabled = useSettingsStore((state) => state.isStackingEnabled);
   const setStackingEnabled = useImageStore((state) => state.setStackingEnabled);
   const indexingProgress = useImageStore((state) => state.progress);
+  const pipelinePhase = useImageStore((state) => state.pipelinePhase);
 
   const hasEnrichmentJob = enrichmentProgress && enrichmentProgress.total > 0;
   const hasAutoTaggingJob = autoTaggingProgress && autoTaggingProgress.total > 0;
   const hasClusteringJob = clusteringProgress && clusteringProgress.total > 0;
   const hasSimilarityGroupJob = similarityGroupProgress && similarityGroupProgress.total > 0;
   const hasIndexingJob = indexingProgress && indexingProgress.total > 0;
-  const hasAnyProgressJob = hasEnrichmentJob || hasAutoTaggingJob || hasClusteringJob || hasSimilarityGroupJob || hasIndexingJob;
+  const hasAnyProgressJob = hasEnrichmentJob || hasAutoTaggingJob || hasClusteringJob || hasSimilarityGroupJob || hasIndexingJob || pipelinePhase !== null;
 
   return (
     <footer className={`sticky bottom-0 px-6 flex items-center gap-4 bg-gray-900/90 backdrop-blur-md border-t border-gray-800/60 transition-all duration-300 shadow-footer-up ${hasAnyProgressJob ? 'h-14 md:h-16' : 'h-12 md:h-14'}`}>
@@ -109,6 +110,18 @@ const Footer: React.FC<FooterProps> = ({
                 <div className="w-20 h-1.5 bg-gray-700/50 rounded-full overflow-hidden">
                   <div className="h-full bg-emerald-500 transition-all duration-500 ease-out" style={{ width: `${(indexingProgress!.current / indexingProgress!.total) * 100}%` }} />
                 </div>
+              </div>
+            )}
+            {/* Unified pipeline phase indicator — shows the active post-indexing phase */}
+            {pipelinePhase && (
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs shadow-sm animate-in fade-in slide-in-from-bottom-2">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                </span>
+                <span className="font-medium">
+                  {pipelinePhase === 'stacking' ? 'Phase 1/2: Stacking…' : 'Phase 2/2: Similarity…'}
+                </span>
               </div>
             )}
             {hasEnrichmentJob && (

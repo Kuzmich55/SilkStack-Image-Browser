@@ -27,6 +27,8 @@ const SIMILARITY_VERSION_KEY = 'similarityGroupVersion';
 let __syncInProgress = false;
 let __similaritySyncInProgress = false;
 let __similaritySyncQueued = false;
+let __pipelineInProgress = false;
+let __pipelineQueued = false;
 
 // ── Undo stack (session-only) ───────────────────────────────────────────
 // Captures pre-merge annotation snapshots so Ctrl+Z can restore them.
@@ -36,6 +38,7 @@ interface UndoEntry {
     imageId: string;
     stackGroupId?: string;
     similarityGroupId?: string;
+    isSimilarityAnalyzed?: boolean;
   }>;
 }
 const __undoStack: UndoEntry[] = [];
@@ -253,6 +256,9 @@ interface ImageState {
   // Similarity Grouping State
   similarityGroupProgress: { current: number; total: number; message: string } | null;
 
+  // Pipeline State
+  pipelinePhase: 'idle' | 'stacking' | 'similarity' | null;
+
   // Auto-Tagging State (Phase 3)
 
   autoTaggingProgress: { current: number; total: number; message: string } | null;
@@ -328,6 +334,7 @@ interface ImageState {
   unmergeSelectedFromStack: () => Promise<void>;
   tryUndo: () => Promise<boolean>;
   computeSimilarityGroups: () => Promise<void>;
+  processPostIndexingPipeline: () => Promise<void>;
   setFullscreenMode: (isFullscreen: boolean) => void;
 
   // Clustering Actions (Phase 2)
@@ -336,6 +343,7 @@ interface ImageState {
   setClusters: (clusters: any[]) => void;
   setClusteringProgress: (progress: { current: number; total: number; message: string } | null) => void;
   setSimilarityGroupProgress: (progress: { current: number; total: number; message: string } | null) => void;
+  setPipelinePhase: (phase: 'idle' | 'stacking' | 'similarity' | null) => void;
   handleClusterImageDeletion: (deletedImageIds: string[]) => void;
   setClusterNavigationContext: (images: IndexedImage[] | null) => void;
 
@@ -530,6 +538,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                         stackGroupId: img.stackGroupId,
                         isStackAnalyzed: img.isStackAnalyzed,
                         similarityGroupId: img.similarityGroupId,
+                        isSimilarityAnalyzed: img.isSimilarityAnalyzed,
                     };
                 }
                 return img;
@@ -599,6 +608,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                                 stackGroupId: img.stackGroupId,
                                 isStackAnalyzed: img.isStackAnalyzed,
                                 similarityGroupId: img.similarityGroupId,
+                                isSimilarityAnalyzed: img.isSimilarityAnalyzed,
                             };
                         }
                         return img;
@@ -738,7 +748,8 @@ export const useImageStore = create<ImageState>((set, get) => {
                 const tagsChanged = JSON.stringify(img.tags || []) !== JSON.stringify(mergedTags);
                 const stackChanged = img.stackGroupId !== annotation.stackGroupId
                     || img.isStackAnalyzed !== annotation.isStackAnalyzed
-                    || img.similarityGroupId !== annotation.similarityGroupId;
+                    || img.similarityGroupId !== annotation.similarityGroupId
+                    || img.isSimilarityAnalyzed !== annotation.isSimilarityAnalyzed;
 
                 if (isFavoriteChanged || tagsChanged || stackChanged) {
                     hasChanges = true;
@@ -751,6 +762,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                         stackGroupId: annotation.stackGroupId,
                         isStackAnalyzed: annotation.isStackAnalyzed,
                         similarityGroupId: annotation.similarityGroupId,
+                        isSimilarityAnalyzed: annotation.isSimilarityAnalyzed,
                     };
                 }
             }
@@ -1211,6 +1223,7 @@ export const useImageStore = create<ImageState>((set, get) => {
 
         // Similarity Grouping initial value
         similarityGroupProgress: null,
+        pipelinePhase: null,
 
         // Auto-Tagging initial values (Phase 3)
 
@@ -1595,6 +1608,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                             stackGroupId: img.stackGroupId,
                             isStackAnalyzed: img.isStackAnalyzed,
                             similarityGroupId: img.similarityGroupId,
+                            isSimilarityAnalyzed: img.isSimilarityAnalyzed,
                         };
                     }
                     return img;
@@ -1914,6 +1928,7 @@ export const useImageStore = create<ImageState>((set, get) => {
         setClusteringProgress: (progress) => set({ clusteringProgress: progress }),
 
         setSimilarityGroupProgress: (progress) => set({ similarityGroupProgress: progress }),
+        setPipelinePhase: (phase) => set({ pipelinePhase: phase }),
 
         setClusterNavigationContext: (images) => set({ clusterNavigationContext: images }),
 
@@ -2130,7 +2145,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                     const resetMap = new Map(state.annotations);
                     for (const [id, ann] of resetMap) {
                         if (ann.similarityGroupId) {
-                            const updated = { ...ann, similarityGroupId: undefined, updatedAt: Date.now() };
+                            const updated = { ...ann, similarityGroupId: undefined, isSimilarityAnalyzed: false, updatedAt: Date.now() };
                             resetAnnotations.push(updated);
                             resetMap.set(id, updated);
                         }
@@ -2148,15 +2163,42 @@ export const useImageStore = create<ImageState>((set, get) => {
                 }
                 localStorage.setItem(SIMILARITY_VERSION_KEY, String(SIMILARITY_GROUP_VERSION));
 
+                // Migrate existing annotations: if similarityGroupId is set
+                // but isSimilarityAnalyzed flag is missing (from a prior version),
+                // mark them as analyzed so they aren't re-processed.
+                const migrationAnnotations: ImageAnnotations[] = [];
+                const migrateMap = new Map(get().annotations);
+                for (const [id, ann] of migrateMap) {
+                    if (ann.similarityGroupId && !ann.isSimilarityAnalyzed) {
+                        const updated = { ...ann, isSimilarityAnalyzed: true, updatedAt: Date.now() };
+                        migrationAnnotations.push(updated);
+                        migrateMap.set(id, updated);
+                    }
+                }
+                if (migrationAnnotations.length > 0) {
+                    const { bulkSaveAnnotations } = await import('../services/imageAnnotationsStorage');
+                    await bulkSaveAnnotations(migrationAnnotations);
+                    const currentImages = get().images;
+                    const currentState = get();
+                    const imagesWithAnnotations = applyAnnotationsToImages(currentImages, migrateMap);
+                    const filteredResult = filterAndSort({ ...currentState, images: imagesWithAnnotations, annotations: migrateMap });
+                    const availableFilters = recalculateAvailableFilters(filteredResult.filteredImages);
+                    set({ ...filteredResult, ...availableFilters, images: imagesWithAnnotations, annotations: migrateMap });
+                    console.log(`[Pipeline] Migrated ${migrationAnnotations.length} annotations: set isSimilarityAnalyzed=true`);
+                }
+
+                // Post-load processing is now handled by the unified
+                // processPostIndexingPipeline() — invoked from App.tsx after
+                // both annotations and images are loaded. This prevents the
+                // race where similarity was scheduled before stacking completed.
                 const updatedState = get();
-                const needsComputation = Array.from(updatedState.annotations.values()).some(
-                    a => a.stackGroupId && !a.similarityGroupId
+                const needsPipeline = Array.from(updatedState.annotations.values()).some(
+                    a => (!a.isStackAnalyzed) || (a.stackGroupId && !a.isSimilarityAnalyzed)
                 );
-                if (needsComputation) {
-                    console.log('[SimilarityGroups] Scheduling similarity computation (deferred 300ms)...');
-                    setTimeout(() => get().computeSimilarityGroups(), 300);
+                if (needsPipeline) {
+                    console.log('[Pipeline] Images need post-indexing processing — will be handled by unified pipeline');
                 } else {
-                    console.log('[SimilarityGroups] All groups already computed — skipping');
+                    console.log('[Pipeline] All processing already complete — skipping');
                 }
             } catch (err) {
                 console.error('[SimilarityGroups] Post-load processing failed (images still loaded):', err);
@@ -2889,6 +2931,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                         // New stack fields
                         stackGroupId,
                         similarityGroupId: existing?.similarityGroupId,
+                        isSimilarityAnalyzed: existing?.isSimilarityAnalyzed,
                         isStackAnalyzed: true,
                         addedAt: existing?.addedAt ?? now,
                         updatedAt: now,
@@ -2916,12 +2959,11 @@ export const useImageStore = create<ImageState>((set, get) => {
                         annotations: newAnnotations,
                     });
 
-                    // After assigning exact stackGroupIds, schedule similarity
-                    // group computation with a short delay so the grid renders
-                    // first and the UI stays responsive during processing.
-                    if (updatedAnnotations.length > 0) {
-                        setTimeout(() => get().computeSimilarityGroups(), 200);
-                    }
+                    // Similarity grouping is now handled by the unified
+                    // processPostIndexingPipeline() coordinator, which runs
+                    // syncNewImagesToStacks → computeSimilarityGroups sequentially.
+                    // This prevents the race where similarity was scheduled
+                    // before stacking fully completed.
                 }
             } catch (error) {
                 console.error('Failed to sync new images to stacks:', error);
@@ -2945,6 +2987,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                         stackGroupId: undefined,
                         isStackAnalyzed: false,
                         similarityGroupId: undefined,
+                        isSimilarityAnalyzed: false,
                         updatedAt: Date.now(),
                     };
                     updatedList.push(updated);
@@ -3022,6 +3065,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                     imageId,
                     stackGroupId: ann?.stackGroupId,
                     similarityGroupId: ann?.similarityGroupId,
+                    isSimilarityAnalyzed: ann?.isSimilarityAnalyzed,
                 });
             }
 
@@ -3054,6 +3098,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                     metadataTags: existing?.metadataTags ?? [],
                     stackGroupId: existing?.stackGroupId,
                     similarityGroupId: targetGroupId,
+                    isSimilarityAnalyzed: true,
                     isStackAnalyzed: existing?.isStackAnalyzed ?? false,
                     addedAt: existing?.addedAt ?? Date.now(),
                     updatedAt: Date.now(),
@@ -3123,6 +3168,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                     imageId,
                     stackGroupId: ann?.stackGroupId,
                     similarityGroupId: ann?.similarityGroupId,
+                    isSimilarityAnalyzed: ann?.isSimilarityAnalyzed,
                 });
             }
 
@@ -3137,6 +3183,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                     ...existing,
                     stackGroupId: undefined,
                     similarityGroupId: undefined,
+                    isSimilarityAnalyzed: false,
                     // Keep isStackAnalyzed true — prevents the image from
                     // being automatically re-grouped on the next sync.
                     updatedAt: Date.now(),
@@ -3213,13 +3260,15 @@ export const useImageStore = create<ImageState>((set, get) => {
                 // Skip if nothing changed (shouldn't happen, but safe)
                 if (
                     existing.stackGroupId === snap.stackGroupId &&
-                    existing.similarityGroupId === snap.similarityGroupId
+                    existing.similarityGroupId === snap.similarityGroupId &&
+                    existing.isSimilarityAnalyzed === snap.isSimilarityAnalyzed
                 ) continue;
 
                 const restored: ImageAnnotations = {
                     ...existing,
                     stackGroupId: snap.stackGroupId,
                     similarityGroupId: snap.similarityGroupId,
+                    isSimilarityAnalyzed: snap.isSimilarityAnalyzed,
                     updatedAt: Date.now(),
                 };
                 restoredAnnotations.push(restored);
@@ -3551,8 +3600,8 @@ export const useImageStore = create<ImageState>((set, get) => {
                     const simId = groupIdToSimId.get(sgId);
                     const targetId = simId || sgId;
 
-                    if (annotation.similarityGroupId !== targetId) {
-                        const updated = { ...annotation, similarityGroupId: targetId, updatedAt: now };
+                    if (annotation.similarityGroupId !== targetId || !annotation.isSimilarityAnalyzed) {
+                        const updated = { ...annotation, similarityGroupId: targetId, isSimilarityAnalyzed: true, updatedAt: now };
                         updatedAnnotations.push(updated);
                     }
                 }
@@ -3568,7 +3617,7 @@ export const useImageStore = create<ImageState>((set, get) => {
                     for (const updated of updatedAnnotations) {
                         // Merge with the freshest version of the annotation
                         const current = freshAnnotations.get(updated.imageId) || updated;
-                        freshAnnotations.set(updated.imageId, { ...current, similarityGroupId: updated.similarityGroupId, updatedAt: now });
+                        freshAnnotations.set(updated.imageId, { ...current, similarityGroupId: updated.similarityGroupId, isSimilarityAnalyzed: updated.isSimilarityAnalyzed, updatedAt: now });
                     }
 
                     const imagesWithAnnotations = applyAnnotationsToImages(currentState.images, freshAnnotations);
@@ -3596,6 +3645,62 @@ export const useImageStore = create<ImageState>((set, get) => {
                 }
                 // Clear progress after a short delay so the user sees completion
                 setTimeout(() => get().setSimilarityGroupProgress(null), 1500);
+            }
+        },
+
+        /**
+         * Unified post-indexing pipeline coordinator.
+         *
+         * Runs processing phases SEQUENTIALLY for images that need them:
+         *   1. Stacking (exact prompt hashing → stackGroupId)
+         *   2. Similarity grouping (semantic clustering → similarityGroupId)
+         *
+         * Called from:
+         *   - App.tsx on startup (when annotations loaded + indexing idle)
+         *   - useImageLoader.ts after file watcher detects new images
+         *
+         * Guards: module-level __pipelineInProgress prevents concurrent runs.
+         * If a call arrives while one is running, it's queued (__pipelineQueued)
+         * and re-invoked after the current run completes.
+         */
+        processPostIndexingPipeline: async () => {
+            if (__pipelineInProgress) {
+                __pipelineQueued = true;
+                return;
+            }
+            __pipelineInProgress = true;
+
+            try {
+                const state = get();
+                if (!state.isAnnotationsLoaded) {
+                    console.log('[Pipeline] Annotations not yet loaded — deferring (will retry on next trigger)');
+                    return;
+                }
+
+                // Phase 1: Exact-prompt hash stacking (syncNewImagesToStacks)
+                // Only processes images where isStackAnalyzed is false.
+                console.log('[Pipeline] Phase 1/2: Prompt stacking (exact-match hashing)...');
+                get().setPipelinePhase('stacking');
+                await get().syncNewImagesToStacks();
+
+                // Phase 2: Semantic similarity grouping
+                // Only processes images where isSimilarityAnalyzed is false
+                // (or where similarityGroupId was never assigned by the engine).
+                console.log('[Pipeline] Phase 2/2: Similarity grouping (semantic clustering)...');
+                get().setPipelinePhase('similarity');
+                await get().computeSimilarityGroups();
+
+                console.log('[Pipeline] All phases complete.');
+            } catch (error) {
+                console.error('[Pipeline] Post-indexing pipeline failed:', error);
+            } finally {
+                get().setPipelinePhase(null);
+                __pipelineInProgress = false;
+                if (__pipelineQueued) {
+                    __pipelineQueued = false;
+                    console.log('[Pipeline] Running queued pipeline invocation');
+                    setTimeout(() => get().processPostIndexingPipeline(), 500);
+                }
             }
         },
 
