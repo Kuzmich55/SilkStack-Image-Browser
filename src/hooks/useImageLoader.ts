@@ -836,6 +836,32 @@ export function useImageLoader() {
       // Initialize AbortController for this indexing operation
       abortControllerRef.current = new AbortController();
 
+      // Use a cancellable throttle for progress updates so that any
+      // pending setTimeout call can be flushed before we clear progress.
+      // Without this, the throttle's delayed final "N/N" update can fire
+      // AFTER setProgress(null), leaving the catalog bar stuck forever.
+      let progressThrottleTimer: ReturnType<typeof setTimeout> | null = null;
+      let progressThrottleLast = 0;
+      const throttledSetProgress = (progress: { current: number; total: number; message?: string }) => {
+        const now = Date.now();
+        if (now - progressThrottleLast >= 200) {
+          progressThrottleLast = now;
+          setProgress(progress);
+        } else {
+          if (progressThrottleTimer) clearTimeout(progressThrottleTimer);
+          progressThrottleTimer = setTimeout(() => {
+            progressThrottleLast = Date.now();
+            setProgress(progress);
+          }, 200 - (now - progressThrottleLast));
+        }
+      };
+      const cancelThrottledProgress = () => {
+        if (progressThrottleTimer) {
+          clearTimeout(progressThrottleTimer);
+          progressThrottleTimer = null;
+        }
+      };
+
       try {
         // Always update the allowed paths in the main process unless skipped (e.g. during batch load)
         if (getIsElectron() && !skipPermissionUpdate) {
@@ -1035,8 +1061,6 @@ export function useImageLoader() {
           setEnrichmentProgress(progress);
         };
 
-        const throttledSetProgress = throttle(setProgress, 200);
-
         const handleDeletion = (deletedFileIds: string[]) => {
           removeImages(deletedFileIds);
         };
@@ -1048,6 +1072,7 @@ export function useImageLoader() {
 
         if (shouldProcessPipeline) {
           if (shouldCancelIndexing(suppressIndexingState)) {
+            cancelThrottledProgress();
             if (suppressIndexingState) {
               setDirectoryRefreshing(directory.id, false);
               setProgress(null);
@@ -1107,15 +1132,21 @@ export function useImageLoader() {
           if (!shouldCancelIndexing(suppressIndexingState)) {
             finalizeDirectoryLoad(directory, { suppressIndexingState });
           }
+          // Cancel any pending throttled progress update BEFORE clearing,
+          // otherwise a delayed "N/N" call would overwrite the null and
+          // leave the catalog bar stuck open.
+          cancelThrottledProgress();
           setProgress(null);
         } else {
           if (shouldHydratePreloadedImages && preloadedImages.length > 0) {
             addImages(preloadedImages);
           }
           finalizeDirectoryLoad(directory, { suppressIndexingState });
+          cancelThrottledProgress();
           setProgress(null);
         }
       } catch (err) {
+        cancelThrottledProgress();
         if (!(err instanceof DOMException && err.name === "AbortError")) {
           console.error(err);
           setError(
