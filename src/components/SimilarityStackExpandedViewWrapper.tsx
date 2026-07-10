@@ -1,13 +1,15 @@
-import React, { useCallback } from 'react';
-import { IndexedImage } from '../types';
+import React, { useCallback, useMemo } from 'react';
+import { Box, FileText, Puzzle } from 'lucide-react';
+import { IndexedImage, StackGroupByDimension } from '../types';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useImageStore } from '../store/useImageStore';
 import { useThumbnail } from '../hooks/useThumbnail';
+import { buildSubGroups } from '../hooks/useImageStacking';
 import { safeLazy } from '../utils/safeLazy';
 
 interface SimilarityStackExpandedViewWrapperProps {
   images: IndexedImage[];
-  subGroups: { promptHash: string; prompt: string; imageIds: string[] }[];
+  subGroups: { promptHash: string; prompt: string; label: string; groupKey: string; imageIds: string[] }[];
   onImageClick: (image: IndexedImage, event: React.MouseEvent) => void;
   selectedImages: Set<string>;
   onBack: () => void;
@@ -35,16 +37,34 @@ const ExpandedViewInner = import.meta.env.VITE_AI_FEATURES_AVAILABLE
     )
   : null;
 
+// ── Grouping dimension definitions ─────────────────────────────────────
+
+type SegmentIcon = React.ComponentType<{ size?: number | string; className?: string }>;
+
+const GROUPING_DIMENSIONS: { key: StackGroupByDimension; label: string; Icon: SegmentIcon; color: string }[] = [
+  { key: 'prompt', label: 'Prompt', Icon: FileText as SegmentIcon, color: 'blue' },
+  { key: 'model',  label: 'Model',  Icon: Box as SegmentIcon,     color: 'amber' },
+  { key: 'loras',  label: 'Loras',  Icon: Puzzle as SegmentIcon,  color: 'emerald' },
+];
+
+const DIMENSION_COLORS: Record<string, { bg: string; text: string; shadow: string; ring: string }> = {
+  blue:    { bg: 'bg-blue-600',    text: 'text-blue-400',    shadow: 'shadow-blue-600/25',    ring: 'ring-blue-500/50' },
+  amber:   { bg: 'bg-amber-600',   text: 'text-amber-400',   shadow: 'shadow-amber-600/25',   ring: 'ring-amber-500/50' },
+  emerald: { bg: 'bg-emerald-600', text: 'text-emerald-400', shadow: 'shadow-emerald-600/25', ring: 'ring-emerald-500/50' },
+};
+
 /**
  * Wrapper around the ai-intelligence SimilarityStackExpandedView that
  * bridges the app's Zustand stores to the component's callback props.
  *
- * The component itself is store-agnostic — this wrapper is the only place
- * that reads from useImageStore and useSettingsStore.
+ * Also provides a grouping-dimension toolbar: checkboxes for Model, Prompt,
+ * and Loras that control how images are sub-grouped within the expanded
+ * stack view. The user can toggle any combination — sub-groups are
+ * recomputed on the fly from the raw image list.
  */
 const SimilarityStackExpandedViewWrapper: React.FC<SimilarityStackExpandedViewWrapperProps> = ({
   images,
-  subGroups,
+  subGroups: propSubGroups,
   onImageClick,
   selectedImages,
   onBack,
@@ -52,12 +72,87 @@ const SimilarityStackExpandedViewWrapper: React.FC<SimilarityStackExpandedViewWr
 }) => {
   const libraryImageSize = useSettingsStore(s => s.viewZoomLevels.library);
   const thumbnailsDisabled = useSettingsStore(s => s.disableThumbnails);
+  const displayStarredFirst = useSettingsStore(s => s.displayStarredFirst);
+  const stackGroupByDimensions = useSettingsStore(s => s.stackGroupByDimensions);
+  const setStackGroupByDimensions = useSettingsStore(s => s.setStackGroupByDimensions);
   const toggleFavorite = useImageStore(s => s.toggleFavorite);
   const toggleImageSelection = useImageStore(s => s.toggleImageSelection);
 
   // Use the zoom level from settings when no explicit imageSize is provided.
-  // This makes the expanded view react to zoom slider changes.
   const imageSize = imageSizeProp ?? libraryImageSize;
+
+  // ── Recompute sub-groups from raw images based on current dimensions ──
+
+  const subGroups = useMemo(() => {
+    if (images.length === 0) return [];
+    return buildSubGroups(images, displayStarredFirst, stackGroupByDimensions);
+  }, [images, displayStarredFirst, stackGroupByDimensions]);
+
+  // ── Dimension labels for the external component heading ──────────────
+
+  const groupByDimensionLabels = useMemo(() => {
+    return stackGroupByDimensions.map(dim => {
+      const def = GROUPING_DIMENSIONS.find(d => d.key === dim);
+      return def ? def.label : dim;
+    });
+  }, [stackGroupByDimensions]);
+
+  // ── Dimension toggle handler ─────────────────────────────────────────
+
+  const handleToggleDimension = useCallback((dim: StackGroupByDimension) => {
+    const current = useSettingsStore.getState().stackGroupByDimensions;
+    const enabled = current.includes(dim);
+    if (enabled) {
+      setStackGroupByDimensions(current.filter(d => d !== dim));
+    } else {
+      setStackGroupByDimensions([...current, dim]);
+    }
+  }, [setStackGroupByDimensions]);
+
+  // ── Build the group-by segmented control as a ReactNode ─────────────
+
+  const groupByToolbar = useMemo(() => (
+    <div className="flex items-center gap-2">
+      <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-gray-500 select-none shrink-0">
+        Group by
+      </span>
+      <div className="flex items-center gap-0.5 bg-gray-800/50 rounded-full p-0.5 border border-gray-700/40 shadow-inner shadow-black/20">
+        {GROUPING_DIMENSIONS.map(({ key, label, Icon, color }) => {
+        const isChecked = stackGroupByDimensions.includes(key);
+        const activeCount = stackGroupByDimensions.length;
+        const c = DIMENSION_COLORS[color];
+        return (
+          <button
+            key={key}
+            onClick={() => handleToggleDimension(key)}
+            className={[
+              'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium select-none',
+              'transition-all duration-200 ease-out',
+              `focus:outline-none focus-visible:ring-2 focus-visible:${c.ring} focus-visible:ring-offset-1 focus-visible:ring-offset-gray-900`,
+              isChecked
+                ? `${c.bg} text-white shadow-lg ${c.shadow} scale-[1.02]`
+                : activeCount === 0
+                  ? 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                  : 'text-gray-500 hover:text-gray-300 hover:bg-white/5',
+            ].join(' ')}
+            title={`${isChecked ? 'Disable' : 'Enable'} grouping by ${label}`}
+          >
+            <Icon
+              size={13}
+              className={[
+                'transition-all duration-200',
+                isChecked ? 'opacity-100' : 'opacity-50',
+              ].join(' ')}
+            />
+            {label}
+          </button>
+        );
+      })}
+      </div>
+    </div>
+  ), [stackGroupByDimensions, handleToggleDimension]);
+
+  // ── Callback bridges ─────────────────────────────────────────────────
 
   const handleToggleFavorite = useCallback((imageId: string) => {
     toggleFavorite(imageId);
@@ -133,21 +228,25 @@ const SimilarityStackExpandedViewWrapper: React.FC<SimilarityStackExpandedViewWr
   }
 
   const Inner = ExpandedViewInner;
+
   return (
     <>
-      {/* Trigger thumbnail loading for all images in the expanded view.
-          Each ThumbnailTrigger calls useThumbnail once (valid hook usage). */}
+      {/* Trigger thumbnail loading for all images in the expanded view. */}
       {images.map(img => (
         <ThumbnailTrigger key={img.id} image={img} />
       ))}
+
+      {/* ── Expanded view ─────────────────────────────────────────────── */}
       <Inner
         images={images as any}
-        subGroups={subGroups}
+        subGroups={subGroups as any}
         onImageClick={onImageClick as any}
         selectedImages={selectedImages}
         onBack={onBack}
         imageSize={imageSize}
         thumbnailsDisabled={thumbnailsDisabled}
+        groupByDimensions={groupByDimensionLabels}
+        groupByToolbar={groupByToolbar}
         onToggleFavorite={handleToggleFavorite}
         onToggleSelection={handleToggleSelection}
         onDragStart={handleDragStart as any}

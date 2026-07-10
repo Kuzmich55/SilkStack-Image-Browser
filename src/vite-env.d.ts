@@ -134,12 +134,14 @@ declare module '@ai-images-browser/ai-intelligence' {
 
   export const SimilarityStackExpandedView: React.FC<{
     images: StackImage[];
-    subGroups: { promptHash: string; prompt: string; imageIds: string[] }[];
+    subGroups: { promptHash: string; prompt: string; label?: string; groupKey?: string; dimensions?: { label: string; value: string }[]; imageIds: string[] }[];
     onImageClick: (image: StackImage, event: React.MouseEvent) => void;
     selectedImages: Set<string>;
     onBack: () => void;
     imageSize?: number;
     thumbnailsDisabled: boolean;
+    groupByDimensions?: string[];
+    groupByToolbar?: React.ReactNode;
     onToggleFavorite: (imageId: string) => void;
     onToggleSelection: (imageId: string) => void;
     onDragStart: (image: StackImage, event: React.DragEvent<HTMLDivElement>) => void;

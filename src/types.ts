@@ -1097,14 +1097,23 @@ export interface SmartCollectionQuery {
   dateRange?: { from: number; to: number };
 }
 
+/** Supported dimensions for grouping images within a stack. */
+export type StackGroupByDimension = 'model' | 'prompt' | 'loras';
+
 /**
- * Sub-group within a stack — images sharing the exact same prompt.
+ * Sub-group within a stack — images sharing the same grouping key.
  * A similarity-based stack may contain multiple sub-groups, each with
- * its own prompt label displayed above its images in the drill-down view.
+ * its own label displayed above its images in the drill-down view.
+ *
+ * The grouping key is a compound of one or more dimensions (model, prompt,
+ * loras) selected by the user via checkboxes in the expanded view toolbar.
  */
 export interface StackSubGroup {
-  promptHash: string;       // FNV-1a hash of the exact normalized prompt
-  prompt: string;           // The exact prompt text for display above images
+  promptHash: string;       // Hash of the grouping key (for React keys / display)
+  prompt: string;           // The prompt text (primary dimension, kept for backward compat)
+  label: string;            // Human-readable label shown above the image group (e.g. "SDXL · a cat")
+  groupKey: string;         // Raw compound grouping key (dimension values joined by |||)
+  dimensions?: { label: string; value: string }[];  // Dimension heading/value pairs for separate display
   imageIds: string[];       // Image IDs in this sub-group
   coverImageId: string;     // First image chronologically (used as thumbnail)
   size: number;             // Number of images in this sub-group
@@ -1134,5 +1143,5 @@ export interface LibraryStackContext {
   stackId: string;
   imageIds: string[];
   basePrompt: string;
-  subGroups?: { promptHash: string; prompt: string; imageIds: string[] }[]; // Sub-group metadata for drill-down display
+  subGroups?: { promptHash: string; prompt: string; label: string; groupKey: string; dimensions?: { label: string; value: string }[]; imageIds: string[] }[]; // Sub-group metadata for drill-down display
 }

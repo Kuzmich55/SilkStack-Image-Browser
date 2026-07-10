@@ -10,7 +10,7 @@ interface FooterProps {
   customText?: string;
   filteredCount?: number;
   totalCount?: number;
-  enrichmentProgress?: { processed: number; total: number } | null;
+  enrichmentProgress?: { processed: number; total: number; message?: string } | null;
   autoTaggingProgress?: { current: number; total: number; message: string } | null;
   clusteringProgress?: { current: number; total: number; message: string } | null;
   similarityGroupProgress?: { current: number; total: number; message: string } | null;
@@ -105,7 +105,14 @@ const Footer: React.FC<FooterProps> = ({
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
                   </span>
-                  <span className="font-medium">Files {indexingProgress!.current}/{indexingProgress!.total}</span>
+                  <span className="font-medium">
+                    Cataloging {indexingProgress!.current}/{indexingProgress!.total}
+                    {indexingProgress!.message && (
+                      <span className="text-gray-500 ml-1 font-normal truncate max-w-[200px] inline-block align-bottom">
+                        — {indexingProgress!.message}
+                      </span>
+                    )}
+                  </span>
                 </div>
                 <div className="w-20 h-1.5 bg-gray-700/50 rounded-full overflow-hidden">
                   <div className="h-full bg-emerald-500 transition-all duration-500 ease-out" style={{ width: `${(indexingProgress!.current / indexingProgress!.total) * 100}%` }} />
@@ -131,7 +138,14 @@ const Footer: React.FC<FooterProps> = ({
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
                   </span>
-                  <span className="font-medium">{enrichmentProgress!.processed}/{enrichmentProgress!.total}</span>
+                  <span className="font-medium">
+                    Enriching {enrichmentProgress!.processed}/{enrichmentProgress!.total}
+                    {enrichmentProgress!.message && (
+                      <span className="text-gray-500 ml-1 font-normal truncate max-w-[200px] inline-block align-bottom">
+                        — {enrichmentProgress!.message}
+                      </span>
+                    )}
+                  </span>
                 </div>
                 <div className="w-20 h-1.5 bg-gray-700/50 rounded-full overflow-hidden">
                   <div className="h-full bg-blue-500 transition-all duration-500 ease-out" style={{ width: `${(enrichmentProgress!.processed / enrichmentProgress!.total) * 100}%` }} />

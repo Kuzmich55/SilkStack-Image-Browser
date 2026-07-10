@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { IndexedImage, ImageStack, StackSubGroup } from '../types';
+import { IndexedImage, ImageStack, StackSubGroup, StackGroupByDimension, LoRAInfo } from '../types';
 import { useImageStore } from '../store/useImageStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 
@@ -110,7 +110,7 @@ const sortItems = (
   });
 };
 
-// ── Prompt resolution ──────────────────────────────────────────────────
+// ── Dimension resolvers ────────────────────────────────────────────────
 
 function resolvePrompt(image: IndexedImage): string {
   return image.prompt
@@ -119,20 +119,142 @@ function resolvePrompt(image: IndexedImage): string {
     || '';
 }
 
+function resolveModel(image: IndexedImage): string {
+  return image.models?.[0]
+    || image.metadata?.normalizedMetadata?.model
+    || (image.metadata as any)?.model
+    || '';
+}
+
+function resolveLoras(image: IndexedImage): string {
+  const loras: (string | LoRAInfo)[] = image.loras
+    || image.metadata?.normalizedMetadata?.loras
+    || (image.metadata as any)?.loras
+    || [];
+  if (!loras.length) return '';
+  return loras
+    .map(l => typeof l === 'string' ? l : (l.name || l.model_name || ''))
+    .filter(Boolean)
+    .sort()
+    .join(', ');
+}
+
 // ── Sub-group construction ─────────────────────────────────────────────
 
-/** Build sub-groups within a set of images by exact prompt text. */
-function buildSubGroups(images: IndexedImage[], displayStarredFirst: boolean): StackSubGroup[] {
-  const byPrompt = new Map<string, IndexedImage[]>();
+/**
+ * Delimiter used in compound grouping keys. Must not appear in model names,
+ * prompt text, or LoRA identifiers.
+ */
+const KEY_DELIMITER = '|||';
+
+/**
+ * Build a compound grouping key from the selected dimensions.
+ * Each dimension contributes its normalized value; empty values fall back
+ * to a sentinel so images with missing metadata still group together.
+ */
+function buildGroupKey(image: IndexedImage, dimensions: StackGroupByDimension[]): string {
+  return dimensions.map(dim => {
+    switch (dim) {
+      case 'model': {
+        const val = resolveModel(image);
+        return val.toLowerCase().trim() || '(no model)';
+      }
+      case 'prompt': {
+        const val = resolvePrompt(image);
+        return val.toLowerCase().replace(/[\s\r\n]+/g, ' ').trim() || '(no prompt)';
+      }
+      case 'loras': {
+        const val = resolveLoras(image);
+        return val.toLowerCase().replace(/[\s\r\n]+/g, ' ').trim() || '(no loras)';
+      }
+      default:
+        return '';
+    }
+  }).join(KEY_DELIMITER);
+}
+
+/**
+ * Build a human-readable label from the selected dimensions for a
+ * representative image in a sub-group.
+ *
+ * For a single dimension the value is returned directly (the heading already
+ * identifies the dimension). For multiple dimensions each value is prefixed
+ * with its dimension name on its own line, so it's clear which value belongs
+ * to which dimension.
+ */
+function buildGroupLabel(image: IndexedImage, dimensions: StackGroupByDimension[]): string {
+  if (dimensions.length === 0) return 'All images';
+
+  if (dimensions.length === 1) {
+    // Single dimension — heading already identifies it, just return the value.
+    const dim = dimensions[0];
+    switch (dim) {
+      case 'model':   return resolveModel(image).trim() || '(no model)';
+      case 'prompt':  return resolvePrompt(image).trim() || '(no prompt)';
+      case 'loras':   return resolveLoras(image).trim() || '(no loras)';
+      default:        return '';
+    }
+  }
+
+  // Multiple dimensions — label each value with its dimension on a separate line.
+  const pairs = dimensions.map(dim => {
+    switch (dim) {
+      case 'model':
+        return `Model: ${resolveModel(image).trim() || '(no model)'}`;
+      case 'prompt':
+        return `Prompt: ${resolvePrompt(image).trim() || '(no prompt)'}`;
+      case 'loras':
+        return `Loras: ${resolveLoras(image).trim() || '(no loras)'}`;
+      default:
+        return '';
+    }
+  }).filter(Boolean);
+
+  return pairs.join('\n');
+}
+
+/**
+ * Build sub-groups within a set of images, grouped by the given dimensions.
+ *
+ * When `dimensions` is `['prompt']` (the default), behaviour is identical to
+ * the original prompt-only grouping. Pass `['model']`, `['loras']`, or any
+ * combination like `['model', 'prompt']` for compound grouping.
+ */
+function buildSubGroups(
+  images: IndexedImage[],
+  displayStarredFirst: boolean,
+  dimensions: StackGroupByDimension[] = ['prompt'],
+): StackSubGroup[] {
+  // When no dimensions are selected, collapse everything into a single group.
+  if (dimensions.length === 0) {
+    const sorted = [...images].sort((a, b) => {
+      if (displayStarredFirst) {
+        if (a.isFavorite && !b.isFavorite) return -1;
+        if (!a.isFavorite && b.isFavorite) return 1;
+      }
+      return (b.lastModified || 0) - (a.lastModified || 0);
+    });
+    return [{
+      promptHash: simpleHash('__all__'),
+      prompt: '',
+      label: '',
+      groupKey: '__all__',
+      dimensions: [],  // Empty array = no grouping; signals flat grid display
+      imageIds: sorted.map(img => img.id),
+      coverImageId: sorted[0]?.id || '',
+      size: sorted.length,
+    }];
+  }
+
+  const byKey = new Map<string, IndexedImage[]>();
 
   for (const img of images) {
-    const prompt = resolvePrompt(img);
-    const key = prompt.toLowerCase().replace(/[\s\r\n]+/g, ' ').trim() || '(no prompt)';
-    const group = byPrompt.get(key);
+    const key = buildGroupKey(img, dimensions);
+    const group = byKey.get(key);
     if (group) {
       group.push(img);
     } else {
-      byPrompt.set(key, [img]);
+      byKey.set(key, [img]);
     }
   }
 
@@ -146,7 +268,7 @@ function buildSubGroups(images: IndexedImage[], displayStarredFirst: boolean): S
 
   const subGroupItems: SubGroupWithDate[] = [];
 
-  for (const [, sgImages] of byPrompt) {
+  for (const [groupKey, sgImages] of byKey) {
     const sorted = [...sgImages].sort((a, b) => {
       // Starred images first within each sub-group
       if (displayStarredFirst) {
@@ -156,22 +278,43 @@ function buildSubGroups(images: IndexedImage[], displayStarredFirst: boolean): S
       // Then by lastModified descending
       return (b.lastModified || 0) - (a.lastModified || 0);
     });
-    const prompt = resolvePrompt(sorted[0]);
+    const repImage = sorted[0];
+    const label = buildGroupLabel(repImage, dimensions);
+    // Set prompt to the label so the external SimilarityStackExpandedView
+    // component displays the correct header regardless of grouping dimensions.
+    const prompt = label;
     const maxLastModified = sgImages.reduce((max, img) => Math.max(max, img.lastModified || 0), 0);
+
+    // Build structured dimension data for separate heading display.
+    const dimensionData = dimensions.length > 0 ? dimensions.map(dim => {
+      switch (dim) {
+        case 'model':
+          return { label: 'Model', value: resolveModel(repImage).trim() || '(no model)' };
+        case 'prompt':
+          return { label: 'Prompt', value: resolvePrompt(repImage).trim() || '(no prompt)' };
+        case 'loras':
+          return { label: 'Loras', value: resolveLoras(repImage).trim() || '(no loras)' };
+        default:
+          return { label: dim, value: '' };
+      }
+    }) : undefined;
 
     subGroupItems.push({
       sg: {
-        promptHash: simpleHash(prompt),
+        promptHash: simpleHash(groupKey),
         prompt,
+        label,
+        groupKey,
+        dimensions: dimensionData,
         imageIds: sorted.map(img => img.id),
-        coverImageId: sorted[0].id,
+        coverImageId: repImage.id,
         size: sorted.length,
       },
       maxLastModified,
     });
   }
 
-  // Sort sub-groups: starred-containing first, then by the latest image's date descending, then size, then alphabetically
+  // Sort sub-groups: starred-containing first, then by the latest image's date descending, then size, then alphabetically by label
   subGroupItems.sort((a, b) => {
     if (displayStarredFirst) {
       const starA = a.sg.imageIds.some(id => starredIds.has(id));
@@ -183,11 +326,15 @@ function buildSubGroups(images: IndexedImage[], displayStarredFirst: boolean): S
     if (b.maxLastModified !== a.maxLastModified) {
       return b.maxLastModified - a.maxLastModified;
     }
-    return b.sg.size - a.sg.size || a.sg.prompt.localeCompare(b.sg.prompt);
+    return b.sg.size - a.sg.size || a.sg.label.localeCompare(b.sg.label);
   });
 
   return subGroupItems.map(item => item.sg);
 }
+
+// Re-export for use in expanded-view wrappers that need to recompute
+// sub-groups when the user changes grouping dimensions at drill-down time.
+export { buildSubGroups, resolvePrompt, resolveModel, resolveLoras };
 
 // ── Grouping strategies ────────────────────────────────────────────────
 

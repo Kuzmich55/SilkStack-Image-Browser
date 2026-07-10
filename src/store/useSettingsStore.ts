@@ -32,7 +32,7 @@ const electronStorage: StateStorage = {
   },
 };
 
-import { Keymap } from '../types';
+import { Keymap, StackGroupByDimension } from '../types';
 
 const detectDefaultIndexingConcurrency = (): number => {
   if (typeof navigator !== 'undefined' && typeof navigator.hardwareConcurrency === 'number') {
@@ -81,6 +81,7 @@ interface SettingsState {
 
   isSidebarCollapsed: boolean;
   isStackingEnabled: boolean;
+  stackGroupByDimensions: StackGroupByDimension[];
 
   // Actions
   setSortOrder: (order: 'asc' | 'desc' | 'date-asc' | 'date-desc' | 'random') => void;
@@ -107,6 +108,7 @@ interface SettingsState {
   setDisableAiFallback: (value: boolean) => void;
   setSidebarCollapsed: (value: boolean) => void;
   setStackingEnabled: (enabled: boolean) => void;
+  setStackGroupByDimensions: (dimensions: StackGroupByDimension[]) => void;
   resetState: () => void;
 }
 
@@ -151,6 +153,7 @@ export const useSettingsStore = create<SettingsState>()(
 
       isSidebarCollapsed: true,
       isStackingEnabled: true,
+      stackGroupByDimensions: ['prompt'],
 
       // Actions
       setSortOrder: (order) => set({ sortOrder: order }),
@@ -188,6 +191,7 @@ export const useSettingsStore = create<SettingsState>()(
       setDisableAiFallback: (value) => set({ disableAiFallback: !!value }),
       setSidebarCollapsed: (value) => set({ isSidebarCollapsed: !!value }),
       setStackingEnabled: (enabled) => set({ isStackingEnabled: enabled }),
+      setStackGroupByDimensions: (dimensions) => set({ stackGroupByDimensions: dimensions }),
       updateKeybinding: (scope, action, keybinding) =>
         set((state) => ({
           keymap: {
@@ -283,6 +287,10 @@ export const useSettingsStore = create<SettingsState>()(
           } catch {
             state.isStackingEnabled = true;
           }
+        }
+
+        if (state && !Array.isArray(state.stackGroupByDimensions)) {
+          state.stackGroupByDimensions = ['prompt'];
         }
       },
     }

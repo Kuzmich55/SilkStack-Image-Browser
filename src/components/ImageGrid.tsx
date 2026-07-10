@@ -1361,6 +1361,9 @@ const ImageGrid: React.FC<ImageGridProps & { width: number; height: number }> = 
       subGroups: stack.subGroups?.map(sg => ({
         promptHash: sg.promptHash,
         prompt: sg.prompt,
+        label: sg.label,
+        groupKey: sg.groupKey,
+        dimensions: sg.dimensions,
         imageIds: sg.imageIds,
       })),
     };

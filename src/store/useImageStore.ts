@@ -202,8 +202,8 @@ interface ImageState {
 
   // UI State
   isLoading: boolean;
-  progress: { current: number; total: number } | null;
-  enrichmentProgress: { processed: number; total: number } | null;
+  progress: { current: number; total: number; message?: string } | null;
+  enrichmentProgress: { processed: number; total: number; message?: string } | null;
   indexingState: 'idle' | 'indexing' | 'paused' | 'completed';
   error: string | null;
   success: string | null;
@@ -284,7 +284,7 @@ interface ImageState {
   toggleIncludeSubfolders: () => void;
   setLoading: (loading: boolean) => void;
   setProgress: (progress: { current: number; total: number } | null) => void;
-  setEnrichmentProgress: (progress: { processed: number; total: number } | null) => void;
+  setEnrichmentProgress: (progress: { processed: number; total: number; message?: string } | null) => void;
   setIndexingState: (indexingState: 'idle' | 'indexing' | 'paused' | 'completed') => void;
   setError: (error: string | null) => void;
   setSuccess: (success: string | null) => void;

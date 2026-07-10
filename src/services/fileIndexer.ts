@@ -1425,7 +1425,7 @@ interface ProcessFilesOptions {
   fileStats?: Map<string, { size?: number; type?: string; birthtimeMs?: number }>;
   onEnrichmentBatch?: (batch: IndexedImage[]) => void;
   enrichmentBatchSize?: number;
-  onEnrichmentProgress?: (progress: { processed: number; total: number } | null) => void;
+  onEnrichmentProgress?: (progress: { processed: number; total: number; message?: string } | null) => void;
   hydratePreloadedImages?: boolean;
 }
 
@@ -1459,7 +1459,7 @@ function mapIndexedImageToCache(image: IndexedImage): CacheImageMetadata {
 
 export async function processFiles(
   fileEntries: CatalogFileEntry[],
-  setProgress: (progress: { current: number; total: number }) => void,
+  setProgress: (progress: { current: number; total: number; message?: string }) => void,
   onBatchProcessed: (batch: IndexedImage[]) => void,
   directoryId: string,
   directoryName: string,
@@ -1706,7 +1706,7 @@ export async function processFiles(
 
     if (countTowardsProgress) {
       processedNew += 1;
-      setProgress({ current: processedNew, total: totalNewFiles });
+      setProgress({ current: processedNew, total: totalNewFiles, message: image.name });
     }
 
     if (emitToUi) {
@@ -1944,7 +1944,7 @@ export async function processFiles(
 
   // Throttle progress updates to every 300ms to avoid excessive re-renders
   const throttledEnrichmentProgress = throttle(
-    (progress: { processed: number; total: number } | null) => {
+    (progress: { processed: number; total: number; message?: string } | null) => {
       options.onEnrichmentProgress?.(progress);
     },
     300
@@ -2039,7 +2039,7 @@ export async function processFiles(
         phaseBStats.profileDimensionsMs += profile.dimensionsMs;
       }
 
-      throttledEnrichmentProgress({ processed: phaseBStats.processed, total: totalEnrichment });
+      throttledEnrichmentProgress({ processed: phaseBStats.processed, total: totalEnrichment, message: entry.image.name });
       logPhaseBProgress(queueLength);
       performance.mark('indexing:phaseB:queue-depth', {
         detail: { depth: queueLength - phaseBStats.processed }

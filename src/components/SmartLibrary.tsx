@@ -101,6 +101,9 @@ const Stacks: React.FC<StacksProps> = () => {
     return activeStack.subGroups.map(sg => ({
       promptHash: sg.promptHash,
       prompt: sg.prompt,
+      label: sg.label,
+      groupKey: sg.groupKey,
+      dimensions: sg.dimensions,
       imageIds: sg.imageIds,
     }));
   }, [activeStack]);

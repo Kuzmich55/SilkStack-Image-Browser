@@ -634,8 +634,9 @@ export function useImageLoader() {
       }
 
       scheduleGlobalFilterRefresh(true);
-      // Trigger unified post-indexing pipeline (stacking → similarity)
-      useImageStore.getState().processPostIndexingPipeline();
+      // Post-indexing pipeline is now triggered after Phase B enrichment
+      // completes (see phaseB.then() callback above). This ensures images
+      // have their prompt/model metadata before stacking/similarity runs.
       if (!suppressIndexingState) {
         setLoading(false);
         setIndexingState("completed");
@@ -1029,7 +1030,7 @@ export function useImageLoader() {
         };
 
         const handleEnrichmentProgress = (
-          progress: { processed: number; total: number } | null,
+          progress: { processed: number; total: number; message?: string } | null,
         ) => {
           setEnrichmentProgress(progress);
         };
@@ -1086,11 +1087,19 @@ export function useImageLoader() {
 
           phaseB
             .then(() => {
+              console.log('[Indexing] Phase B enrichment complete — triggering post-indexing pipeline');
+              // Run the unified pipeline AFTER enrichment completes, so
+              // images have their prompt/model metadata populated before
+              // stacking and similarity grouping run.
+              useImageStore.getState().processPostIndexingPipeline();
               // Keep the progress bar visible for 2 seconds after completion
               setTimeout(() => setEnrichmentProgress(null), 2000);
             })
             .catch((err) => {
               console.error("Phase B enrichment failed", err);
+              // Still attempt pipeline on partial enrichment — some images
+              // may have been enriched successfully.
+              useImageStore.getState().processPostIndexingPipeline();
               // Keep error visible for 2 seconds
               setTimeout(() => setEnrichmentProgress(null), 2000);
             });

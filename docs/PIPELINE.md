@@ -35,6 +35,19 @@ The **Unified Post-Indexing Pipeline** (`processPostIndexingPipeline`) is the si
 | `syncNewImagesToStacks()` scheduled `computeSimilarityGroups` via `setTimeout(200)` | Pipeline calls Phase 1 → Phase 2 sequentially |
 | `indexingState` transition triggered `syncNewImagesToStacks` (one-shot — could skip) | Startup check waits for `isAnnotationsLoaded && indexingState === 'idle'` |
 | File watcher called `syncNewImagesToStacks` directly (skipping similarity) | File watcher calls `processPostIndexingPipeline` (all phases) |
+| **Pipeline ran from `finalizeDirectoryLoad` BEFORE Phase B enrichment completed** | **Pipeline triggers in `phaseB.then()` AFTER enrichment populates metadata** |
+
+### Critical Timing Fix
+
+The pipeline MUST run **after** Phase B (enrichment/metadata parsing) completes. If it runs before, images still have `enrichmentState: 'catalog'` with no `prompt` data. `syncNewImagesToStacks` then sets `isStackAnalyzed: true` with `stackGroupId: undefined` (no prompt to hash), which `computeSimilarityGroups` later misinterprets as "intentionally unstacked" — permanently skipping the image across all subsequent boots.
+
+**Enrichment → Pipeline ordering is enforced in both paths:**
+
+| Path | Enrichment trigger | Pipeline trigger |
+|------|-------------------|-----------------|
+| Initial indexing | `processFiles()` returns `{ phaseB }` | `phaseB.then(() => processPostIndexingPipeline())` |
+| File watcher | `processFiles()` returns `{ phaseB }` | `await phaseB; processPostIndexingPipeline()` |
+| App startup (cached) | N/A (already enriched) | `useEffect([isAnnotationsLoaded, indexingState])` in App.tsx |
 
 ## Pipeline Phases
 
@@ -236,7 +249,25 @@ To add a new automatic processing phase to the pipeline:
 - `[Pipeline] Running queued pipeline invocation` — A follow-up run was queued (normal under high churn)
 
 ### Footer indicators
-- **Amber "Phase 1/2: Stacking…"** — Exact-prompt hashing in progress
-- **Amber "Phase 2/2: Similarity…"** — Semantic clustering in progress
-- **Green "Files X/Y"** — File indexing (precedes pipeline)
-- **Blue "X/Y"** — Metadata enrichment (precedes pipeline)
+
+Each processing stage has its own color-coded badge with file-level detail:
+
+| Badge | Color | Shows | Meaning |
+|-------|-------|-------|---------|
+| **Cataloging X/Y — file.png** | 🟢 Green | File count + current file name | Phase A: building catalog stubs |
+| **Enriching X/Y — file.png** | 🔵 Blue | File count + current file name | Phase B: parsing metadata from binary |
+| **Phase 1/2: Stacking…** | 🟠 Amber | Phase label | Pipeline: exact-prompt hashing |
+| **Phase 2/2: Similarity…** | 🟠 Amber | Phase label | Pipeline: semantic clustering |
+| **Similarity message** | 🟢 Green | `similarityGroupProgress.message` | Clustering progress with counts |
+
+**Troubleshooting guide:**
+
+| What you see | What it means | Action |
+|-------------|---------------|--------|
+| "Cataloging 1/1 — image.png" stuck | Phase A has 1 file; check if Phase B started | Wait for Phase B to begin (blue badge should appear) |
+| "Enriching 0/1" no file name | Phase B queued but hasn't started processing | Normal — worker pool initializing |
+| "Enriching 1/1 — image.png" stuck | Phase B is parsing this file (large file, slow parse) | Check file size; PNG iTXt chunks require deflate decompression |
+| "Phase 1/2: Stacking…" persists | Stacking engine is running; may be slow for many new images | Check console for `[Pipeline]` logs |
+| No badge after enrichment completes | Pipeline hasn't triggered yet or enrichment failed | Check console for Phase B errors; pipeline triggers in `phaseB.then()` |
+| "Cataloging" → nothing → "Phase 1/2" | Normal flow: Phase A complete → Phase B runs silently → Pipeline starts | Expected behavior when Phase B is fast |
+| All badges gone but images not stacked | Possible: pipeline ran before enrichment completed (fixed — see Critical Timing Fix) | If reproducing after fix, check `isStackAnalyzed` flag in IndexedDB |
