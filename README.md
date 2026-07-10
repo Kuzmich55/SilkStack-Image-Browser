@@ -15,7 +15,7 @@ It scans your folders, parses metadata from popular tools (ComfyUI, Automatic111
 
 - **Fast local browser** for AI images (no accounts, no cloud, no telemetry)
 - **Rich metadata parsing** for Stable Diffusion / A1111 / ComfyUI and other tools, including WebP format.
-- **Beautuful Image Grid** with adaptive layout and smooth scrolling.
+- **Beautiful Image Grid** with adaptive layout and smooth scrolling.
 - **Auto-Watch functionality** for real-time monitoring of output folders during generation.
 - **Powerful search & filters** by prompt text, model, steps, CFG, sampler, seed, etc.
 - **Smart Library** with clustering stacks and collections
