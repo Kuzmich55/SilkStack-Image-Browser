@@ -53,3 +53,31 @@ describe('Ideogram 4.0 subgraph prompt extraction', () => {
     assertValidJsonPrompt(result.prompt);
   });
 });
+
+describe('Ideogram 4.0 model name extraction', () => {
+  const fixturePath = path.join(__dirname, 'fixtures', 'comfyui', 'ideogram4-workflow.json');
+  const rawData = JSON.parse(fs.readFileSync(fixturePath, 'utf-8'));
+
+  it('should extract the positive (conditional) model name from UNETLoader via DualModelGuider and CFGOverride', () => {
+    const result = resolvePromptFromGraph(rawData.workflow, rawData.prompt);
+    // The model should be extracted by tracing:
+    // SamplerCustomAdvanced → guider → DualModelGuider → model → CFGOverride → model → UNETLoader
+    // The UNETLoader node 23 has widgets_values: ["ideogram4_int8_convrot.safetensors", "default"]
+    expect(result.model).toBe('ideogram4_int8_convrot.safetensors');
+  });
+
+  it('should extract the model even with parsed objects', () => {
+    const workflow = JSON.parse(rawData.workflow);
+    const prompt = JSON.parse(rawData.prompt);
+    const result = resolvePromptFromGraph(workflow, prompt);
+    expect(result.model).toBe('ideogram4_int8_convrot.safetensors');
+  });
+
+  it('should NOT extract the unconditional model (model_negative)', () => {
+    const result = resolvePromptFromGraph(rawData.workflow, rawData.prompt);
+    // The unconditional model (node 154) has "ideogram4_unconditional_int8_convrot.safetensors"
+    // This should NOT be extracted as the main model
+    expect(result.model).not.toBe('ideogram4_unconditional_int8_convrot.safetensors');
+    expect(result.model).not.toContain('unconditional');
+  });
+});

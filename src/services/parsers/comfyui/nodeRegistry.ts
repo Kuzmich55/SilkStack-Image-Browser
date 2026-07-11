@@ -1034,6 +1034,38 @@ export const NodeRegistry: Record<string, NodeDefinition> = {
     widget_order: ['cfg']
   },
 
+  // --- DUAL-MODEL & CFG OVERRIDE NODES (Ideogram 4.0, etc.) ---
+  DualModelGuider: {
+    category: 'CONDITIONING', roles: ['TRANSFORM'],
+    inputs: {
+      model: { type: 'MODEL' },           // Positive / conditional model (slot 0)
+      positive: { type: 'CONDITIONING' },
+      model_negative: { type: 'MODEL' },  // Unconditional model (slot 2)
+      negative: { type: 'CONDITIONING' }
+    },
+    outputs: { GUIDER: { type: 'GUIDER' } },
+    param_mapping: {
+      cfg: { source: 'widget', key: 'cfg' },
+      model: { source: 'trace', input: 'model' },
+      prompt: { source: 'trace', input: 'positive' },
+      negativePrompt: { source: 'trace', input: 'negative' }
+    },
+    widget_order: ['cfg']
+  },
+
+  CFGOverride: {
+    category: 'TRANSFORM', roles: ['PASS_THROUGH'],
+    inputs: {
+      model: { type: 'MODEL' }
+    },
+    outputs: { MODEL: { type: 'MODEL' } },
+    param_mapping: {
+      model: { source: 'trace', input: 'model' }
+    },
+    widget_order: ['cfg', 'cfg_cond', 'cfg_uncond'],
+    pass_through_rules: [{ from_input: 'model', to_output: 'MODEL' }]
+  },
+
   CascadeResolutions: {
     category: 'UTILS', roles: ['SOURCE'],
     inputs: {},
