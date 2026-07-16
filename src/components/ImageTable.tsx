@@ -15,10 +15,19 @@ interface ImageTableProps {
   selectedImages: Set<string>;
 }
 
-type SortField = 'filename' | 'model' | 'steps' | 'cfg' | 'size' | 'seed';
+type SortField = 'filename' | 'model' | 'steps' | 'cfg' | 'size' | 'aspect' | 'seed' | 'filesize';
 type SortDirection = 'asc' | 'desc' | null;
 
 const VIDEO_EXTENSIONS = ['.mp4', '.webm', '.mkv', '.mov', '.avi'];
+
+const formatFileSize = (bytes?: number): string => {
+  if (bytes == null || isNaN(bytes)) return '—';
+  if (bytes === 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / Math.pow(1024, i);
+  return `${i === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[i]}`;
+};
 
 const isVideoFileName = (fileName: string, fileType?: string | null): boolean => {
   if (fileType && fileType.startsWith('video/')) {
@@ -100,6 +109,21 @@ const ImageTable: React.FC<ImageTableProps> = ({ images, onImageClick, selectedI
           bValue = bW * bH;
           break;
         }
+        case 'aspect': {
+          const aDims = a.dimensions || (a.metadata as any)?.dimensions || '0×0';
+          const bDims = b.dimensions || (b.metadata as any)?.dimensions || '0×0';
+          const [aW, aH] = aDims.split('×').map(Number);
+          const [bW, bH] = bDims.split('×').map(Number);
+          const aRatio = aW && aH ? aW / aH : 0;
+          const bRatio = bW && bH ? bW / bH : 0;
+          aValue = aRatio;
+          bValue = bRatio;
+          break;
+        }
+        case 'filesize':
+          aValue = a.fileSize || 0;
+          bValue = b.fileSize || 0;
+          break;
         case 'seed': {
           const aSeed = a.seed || (a.metadata as any)?.seed || (a.metadata as any)?.normalizedMetadata?.seed || 0;
           const bSeed = b.seed || (b.metadata as any)?.seed || (b.metadata as any)?.normalizedMetadata?.seed || 0;
@@ -153,17 +177,59 @@ const ImageTable: React.FC<ImageTableProps> = ({ images, onImageClick, selectedI
     setSortedImages(sorted);
   }, [images, sortField, sortDirection, applySorting]);
 
-  const columnWidths = [
-    '96px', // Preview
-    '280px', // Filename
-    '220px', // Model
-    '110px', // Steps
-    '110px', // CFG
-    '140px', // Size
-    '160px', // Seed
-  ];
+  // Column resize state
+  const DEFAULT_COLUMN_WIDTHS = [96, 280, 220, 110, 110, 100, 70, 100, 160];
+  const MIN_COLUMN_WIDTH = 50;
 
-  const gridTemplateColumns = columnWidths.join(' ');
+  const [columnWidths, setColumnWidths] = useState<number[]>(DEFAULT_COLUMN_WIDTHS);
+  const [resizing, setResizing] = useState<{ index: number; startX: number; startWidth: number } | null>(null);
+
+  const handleResizeStart = useCallback((index: number, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setResizing({ index, startX: e.clientX, startWidth: columnWidths[index] });
+  }, [columnWidths]);
+
+  const handleResizeDoubleClick = useCallback((index: number) => {
+    setColumnWidths(prev => {
+      const next = [...prev];
+      next[index] = DEFAULT_COLUMN_WIDTHS[index];
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!resizing) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const delta = e.clientX - resizing.startX;
+      const newWidth = Math.max(MIN_COLUMN_WIDTH, resizing.startWidth + delta);
+      setColumnWidths(prev => {
+        const next = [...prev];
+        next[resizing.index] = newWidth;
+        return next;
+      });
+    };
+
+    const handleMouseUp = () => {
+      setResizing(null);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [resizing]);
+
+  const gridTemplateColumns = columnWidths.map(w => `${w}px`).join(' ');
+  const totalWidth = columnWidths.reduce((sum, w) => sum + w, 0);
 
   // Row renderer for virtualized list
   const Row = ({ index, style }: { index: number; style: React.CSSProperties }) => {
@@ -187,41 +253,125 @@ const ImageTable: React.FC<ImageTableProps> = ({ images, onImageClick, selectedI
   return (
     <div className="h-full flex flex-col overflow-hidden">
       <div className="overflow-x-auto">
-        <div className="min-w-[1100px]">
+        <div style={{ minWidth: totalWidth }}>
           {/* Fixed Header */}
           <div className="bg-gray-800 border-b border-gray-700" style={{ height: HEADER_HEIGHT }}>
             <div className="grid text-sm" style={{ gridTemplateColumns }}>
-              <div className="px-3 py-3 text-left text-xs font-semibold text-gray-300 uppercase tracking-wider">Preview</div>
-              <button
-                className="px-3 py-3 text-left text-xs font-semibold text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-700/50 transition-colors flex items-center gap-1"
-                onClick={() => handleSort('filename')}
-              >
-                <span className="flex items-center gap-1">Filename {getSortIcon('filename')}</span>
-              </button>
-              <button
-                className="px-3 py-3 text-left text-xs font-semibold text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-700/50 transition-colors flex items-center gap-1"
-                onClick={() => handleSort('model')}
-              >
-                <span className="flex items-center gap-1">Model {getSortIcon('model')}</span>
-              </button>
-              <button
-                className="px-3 py-3 text-left text-xs font-semibold text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-700/50 transition-colors flex items-center gap-1"
-                onClick={() => handleSort('steps')}
-              >
-                <span className="flex items-center gap-1">Steps {getSortIcon('steps')}</span>
-              </button>
-              <button
-                className="px-3 py-3 text-left text-xs font-semibold text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-700/50 transition-colors flex items-center gap-1"
-                onClick={() => handleSort('cfg')}
-              >
-                <span className="flex items-center gap-1">CFG {getSortIcon('cfg')}</span>
-              </button>
-              <button
-                className="px-3 py-3 text-left text-xs font-semibold text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-700/50 transition-colors flex items-center gap-1"
-                onClick={() => handleSort('size')}
-              >
-                <span className="flex items-center gap-1">Size {getSortIcon('size')}</span>
-              </button>
+              <div className="relative px-3 py-3 text-left text-xs font-semibold text-gray-300 uppercase tracking-wider select-none">
+                Preview
+                <div
+                  className="absolute right-0 top-0 bottom-0 w-[4px] cursor-col-resize z-10 group"
+                  onMouseDown={(e) => handleResizeStart(0, e)}
+                  onDoubleClick={() => handleResizeDoubleClick(0)}
+                >
+                  <div className={`absolute right-0 top-0 bottom-0 w-px transition-colors ${resizing?.index === 0 ? 'bg-blue-500' : 'bg-gray-700 group-hover:bg-blue-500'}`} />
+                </div>
+              </div>
+              <div className="relative">
+                <button
+                  className="w-full px-3 py-3 text-left text-xs font-semibold text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-700/50 transition-colors flex items-center gap-1"
+                  onClick={() => handleSort('filename')}
+                >
+                  <span className="flex items-center gap-1">Filename {getSortIcon('filename')}</span>
+                </button>
+                <div
+                  className="absolute right-0 top-0 bottom-0 w-[4px] cursor-col-resize z-10 group"
+                  onMouseDown={(e) => handleResizeStart(1, e)}
+                  onDoubleClick={() => handleResizeDoubleClick(1)}
+                >
+                  <div className={`absolute right-0 top-0 bottom-0 w-px transition-colors ${resizing?.index === 1 ? 'bg-blue-500' : 'bg-gray-700 group-hover:bg-blue-500'}`} />
+                </div>
+              </div>
+              <div className="relative">
+                <button
+                  className="w-full px-3 py-3 text-left text-xs font-semibold text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-700/50 transition-colors flex items-center gap-1"
+                  onClick={() => handleSort('model')}
+                >
+                  <span className="flex items-center gap-1">Model {getSortIcon('model')}</span>
+                </button>
+                <div
+                  className="absolute right-0 top-0 bottom-0 w-[4px] cursor-col-resize z-10 group"
+                  onMouseDown={(e) => handleResizeStart(2, e)}
+                  onDoubleClick={() => handleResizeDoubleClick(2)}
+                >
+                  <div className={`absolute right-0 top-0 bottom-0 w-px transition-colors ${resizing?.index === 2 ? 'bg-blue-500' : 'bg-gray-700 group-hover:bg-blue-500'}`} />
+                </div>
+              </div>
+              <div className="relative">
+                <button
+                  className="w-full px-3 py-3 text-left text-xs font-semibold text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-700/50 transition-colors flex items-center gap-1"
+                  onClick={() => handleSort('steps')}
+                >
+                  <span className="flex items-center gap-1">Steps {getSortIcon('steps')}</span>
+                </button>
+                <div
+                  className="absolute right-0 top-0 bottom-0 w-[4px] cursor-col-resize z-10 group"
+                  onMouseDown={(e) => handleResizeStart(3, e)}
+                  onDoubleClick={() => handleResizeDoubleClick(3)}
+                >
+                  <div className={`absolute right-0 top-0 bottom-0 w-px transition-colors ${resizing?.index === 3 ? 'bg-blue-500' : 'bg-gray-700 group-hover:bg-blue-500'}`} />
+                </div>
+              </div>
+              <div className="relative">
+                <button
+                  className="w-full px-3 py-3 text-left text-xs font-semibold text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-700/50 transition-colors flex items-center gap-1"
+                  onClick={() => handleSort('cfg')}
+                >
+                  <span className="flex items-center gap-1">CFG {getSortIcon('cfg')}</span>
+                </button>
+                <div
+                  className="absolute right-0 top-0 bottom-0 w-[4px] cursor-col-resize z-10 group"
+                  onMouseDown={(e) => handleResizeStart(4, e)}
+                  onDoubleClick={() => handleResizeDoubleClick(4)}
+                >
+                  <div className={`absolute right-0 top-0 bottom-0 w-px transition-colors ${resizing?.index === 4 ? 'bg-blue-500' : 'bg-gray-700 group-hover:bg-blue-500'}`} />
+                </div>
+              </div>
+              <div className="relative">
+                <button
+                  className="w-full px-3 py-3 text-left text-xs font-semibold text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-700/50 transition-colors flex items-center gap-1"
+                  onClick={() => handleSort('size')}
+                >
+                  <span className="flex items-center gap-1">Resolution {getSortIcon('size')}</span>
+                </button>
+                <div
+                  className="absolute right-0 top-0 bottom-0 w-[4px] cursor-col-resize z-10 group"
+                  onMouseDown={(e) => handleResizeStart(5, e)}
+                  onDoubleClick={() => handleResizeDoubleClick(5)}
+                >
+                  <div className={`absolute right-0 top-0 bottom-0 w-px transition-colors ${resizing?.index === 5 ? 'bg-blue-500' : 'bg-gray-700 group-hover:bg-blue-500'}`} />
+                </div>
+              </div>
+              <div className="relative">
+                <button
+                  className="w-full px-3 py-3 text-left text-xs font-semibold text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-700/50 transition-colors flex items-center gap-1"
+                  onClick={() => handleSort('aspect')}
+                >
+                  <span className="flex items-center gap-1">Aspect {getSortIcon('aspect')}</span>
+                </button>
+                <div
+                  className="absolute right-0 top-0 bottom-0 w-[4px] cursor-col-resize z-10 group"
+                  onMouseDown={(e) => handleResizeStart(6, e)}
+                  onDoubleClick={() => handleResizeDoubleClick(6)}
+                >
+                  <div className={`absolute right-0 top-0 bottom-0 w-px transition-colors ${resizing?.index === 6 ? 'bg-blue-500' : 'bg-gray-700 group-hover:bg-blue-500'}`} />
+                </div>
+              </div>
+              <div className="relative">
+                <button
+                  className="w-full px-3 py-3 text-left text-xs font-semibold text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-700/50 transition-colors flex items-center gap-1"
+                  onClick={() => handleSort('filesize')}
+                >
+                  <span className="flex items-center gap-1">File Size {getSortIcon('filesize')}</span>
+                </button>
+                <div
+                  className="absolute right-0 top-0 bottom-0 w-[4px] cursor-col-resize z-10 group"
+                  onMouseDown={(e) => handleResizeStart(7, e)}
+                  onDoubleClick={() => handleResizeDoubleClick(7)}
+                >
+                  <div className={`absolute right-0 top-0 bottom-0 w-px transition-colors ${resizing?.index === 7 ? 'bg-blue-500' : 'bg-gray-700 group-hover:bg-blue-500'}`} />
+                </div>
+              </div>
               <button
                 className="px-3 py-3 text-left text-xs font-semibold text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-700/50 transition-colors flex items-center gap-1"
                 onClick={() => handleSort('seed')}
@@ -236,7 +386,7 @@ const ImageTable: React.FC<ImageTableProps> = ({ images, onImageClick, selectedI
       {/* Virtualized Content */}
       <div className="flex-1 overflow-hidden">
         <div className="h-full overflow-x-auto">
-          <div className="min-w-[1100px] h-full">
+          <div style={{ minWidth: totalWidth }} className="h-full">
             <AutoSizer>
               {({ height, width }: { height: number; width: number }) => (
                 <List
@@ -503,21 +653,23 @@ const ImageTableRow: React.FC<ImageTableRowProps> = React.memo(({ image, onImage
         {(() => {
           const width = (image.metadata as any)?.width || (image.metadata as any)?.normalizedMetadata?.width;
           const height = (image.metadata as any)?.height || (image.metadata as any)?.normalizedMetadata?.height;
-          const ratio = getAspectRatio(width, height);
-          
           const dims = image.dimensions ||
                       (image.metadata as any)?.dimensions ||
                       (width && height ? `${width}×${height}` : null);
-          
           if (!dims) return <span className="text-gray-600">—</span>;
-          
-          return (
-            <span>
-              {dims}
-              {ratio && <span className="text-gray-500 ml-1">({ratio})</span>}
-            </span>
-          );
+          return <span>{dims}</span>;
         })()}
+      </div>
+      <div className="px-3 py-2 text-gray-400 font-mono text-xs">
+        {(() => {
+          const width = (image.metadata as any)?.width || (image.metadata as any)?.normalizedMetadata?.width;
+          const height = (image.metadata as any)?.height || (image.metadata as any)?.normalizedMetadata?.height;
+          const ratio = getAspectRatio(width, height);
+          return ratio ? <span>{ratio}</span> : <span className="text-gray-600">—</span>;
+        })()}
+      </div>
+      <div className="px-3 py-2 text-gray-400 font-mono text-xs">
+        {formatFileSize(image.fileSize)}
       </div>
       <div className="px-3 py-2 text-gray-500 font-mono text-xs truncate" title={(image.seed || (image.metadata as any)?.seed || (image.metadata as any)?.normalizedMetadata?.seed)?.toString()}>
         {(() => {
