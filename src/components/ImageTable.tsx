@@ -15,7 +15,7 @@ interface ImageTableProps {
   selectedImages: Set<string>;
 }
 
-type SortField = 'filename' | 'model' | 'steps' | 'cfg' | 'size' | 'aspect' | 'seed' | 'filesize';
+type SortField = 'filename' | 'model' | 'steps' | 'cfg' | 'size' | 'megapixel' | 'aspect' | 'seed' | 'filesize';
 type SortDirection = 'asc' | 'desc' | null;
 
 const VIDEO_EXTENSIONS = ['.mp4', '.webm', '.mkv', '.mov', '.avi'];
@@ -109,6 +109,15 @@ const ImageTable: React.FC<ImageTableProps> = ({ images, onImageClick, selectedI
           bValue = bW * bH;
           break;
         }
+        case 'megapixel': {
+          const aDims = a.dimensions || (a.metadata as any)?.dimensions || '0x0';
+          const bDims = b.dimensions || (b.metadata as any)?.dimensions || '0x0';
+          const [aW, aH] = aDims.split('×').map(Number);
+          const [bW, bH] = bDims.split('×').map(Number);
+          aValue = aW * aH;
+          bValue = bW * bH;
+          break;
+        }
         case 'aspect': {
           const aDims = a.dimensions || (a.metadata as any)?.dimensions || '0×0';
           const bDims = b.dimensions || (b.metadata as any)?.dimensions || '0×0';
@@ -178,7 +187,7 @@ const ImageTable: React.FC<ImageTableProps> = ({ images, onImageClick, selectedI
   }, [images, sortField, sortDirection, applySorting]);
 
   // Column resize state
-  const DEFAULT_COLUMN_WIDTHS = [96, 280, 220, 110, 110, 100, 70, 100, 160];
+  const DEFAULT_COLUMN_WIDTHS = [96, 280, 220, 110, 110, 100, 80, 70, 100, 160];
   const MIN_COLUMN_WIDTH = 50;
 
   const [columnWidths, setColumnWidths] = useState<number[]>(DEFAULT_COLUMN_WIDTHS);
@@ -345,9 +354,9 @@ const ImageTable: React.FC<ImageTableProps> = ({ images, onImageClick, selectedI
               <div className="relative">
                 <button
                   className="w-full px-3 py-3 text-left text-xs font-semibold text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-700/50 transition-colors flex items-center gap-1"
-                  onClick={() => handleSort('aspect')}
+                  onClick={() => handleSort('megapixel')}
                 >
-                  <span className="flex items-center gap-1">Aspect {getSortIcon('aspect')}</span>
+                  <span className="flex items-center gap-1">MP {getSortIcon('megapixel')}</span>
                 </button>
                 <div
                   className="absolute right-0 top-0 bottom-0 w-[4px] cursor-col-resize z-10 group"
@@ -360,9 +369,9 @@ const ImageTable: React.FC<ImageTableProps> = ({ images, onImageClick, selectedI
               <div className="relative">
                 <button
                   className="w-full px-3 py-3 text-left text-xs font-semibold text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-700/50 transition-colors flex items-center gap-1"
-                  onClick={() => handleSort('filesize')}
+                  onClick={() => handleSort('aspect')}
                 >
-                  <span className="flex items-center gap-1">File Size {getSortIcon('filesize')}</span>
+                  <span className="flex items-center gap-1">Aspect {getSortIcon('aspect')}</span>
                 </button>
                 <div
                   className="absolute right-0 top-0 bottom-0 w-[4px] cursor-col-resize z-10 group"
@@ -370,6 +379,21 @@ const ImageTable: React.FC<ImageTableProps> = ({ images, onImageClick, selectedI
                   onDoubleClick={() => handleResizeDoubleClick(7)}
                 >
                   <div className={`absolute right-0 top-0 bottom-0 w-px transition-colors ${resizing?.index === 7 ? 'bg-blue-500' : 'bg-gray-700 group-hover:bg-blue-500'}`} />
+                </div>
+              </div>
+              <div className="relative">
+                <button
+                  className="w-full px-3 py-3 text-left text-xs font-semibold text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-700/50 transition-colors flex items-center gap-1"
+                  onClick={() => handleSort('filesize')}
+                >
+                  <span className="flex items-center gap-1">File Size {getSortIcon('filesize')}</span>
+                </button>
+                <div
+                  className="absolute right-0 top-0 bottom-0 w-[4px] cursor-col-resize z-10 group"
+                  onMouseDown={(e) => handleResizeStart(8, e)}
+                  onDoubleClick={() => handleResizeDoubleClick(8)}
+                >
+                  <div className={`absolute right-0 top-0 bottom-0 w-px transition-colors ${resizing?.index === 8 ? 'bg-blue-500' : 'bg-gray-700 group-hover:bg-blue-500'}`} />
                 </div>
               </div>
               <button
@@ -658,6 +682,15 @@ const ImageTableRow: React.FC<ImageTableRowProps> = React.memo(({ image, onImage
                       (width && height ? `${width}×${height}` : null);
           if (!dims) return <span className="text-gray-600">—</span>;
           return <span>{dims}</span>;
+        })()}
+      </div>
+      <div className="px-3 py-2 text-gray-400 font-mono text-xs">
+        {(() => {
+          const width = (image.metadata as any)?.width || (image.metadata as any)?.normalizedMetadata?.width;
+          const height = (image.metadata as any)?.height || (image.metadata as any)?.normalizedMetadata?.height;
+          if (!width || !height) return <span className="text-gray-600">—</span>;
+          const mp = (width * height) / 1_000_000;
+          return <span>{mp >= 10 ? mp.toFixed(0) : mp.toFixed(1)} MP</span>;
         })()}
       </div>
       <div className="px-3 py-2 text-gray-400 font-mono text-xs">
