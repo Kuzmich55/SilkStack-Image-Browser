@@ -434,6 +434,28 @@ function createNodeMap(workflow: any, prompt: any): Graph {
                     });
                 }
 
+                // Build a mapping from subgraph input index → parent widgets_values index.
+                // Only used when the subgraph lacks explicit proxyWidgets metadata.
+                // Subgraph inputs of connection-only types (VAE, CLIP, MODEL, UPSCALE_MODEL)
+                // and inputs with no internal links are skipped — they don't consume a
+                // widget value slot.  The remaining "widget-type" inputs map to
+                // widgets_values in the order they appear in the subgraph definition.
+                const hasProxyWidgets = !!subgraphDef.properties?.proxyWidgets;
+                const widgetIndexMap = new Map<number, number>();
+                if (!hasProxyWidgets && wNode.widgets_values && wNode.widgets_values.length > 0 && subgraphDef.inputs) {
+                    const CONNECTION_TYPES = new Set(['VAE', 'CLIP', 'MODEL', 'UPSCALE_MODEL']);
+                    let widgetIdx = 0;
+                    for (let i = 0; i < subgraphDef.inputs.length; i++) {
+                        const sgInput = subgraphDef.inputs[i];
+                        const isConnectionType = CONNECTION_TYPES.has(sgInput.type);
+                        const hasLinks = sgInput.linkIds && sgInput.linkIds.length > 0;
+                        if (!isConnectionType && hasLinks && widgetIdx < wNode.widgets_values.length) {
+                            widgetIndexMap.set(i, widgetIdx);
+                            widgetIdx++;
+                        }
+                    }
+                }
+
                 // Mapeia links internos para identificar proxies de I/O
                 if (subgraphDef.links) {
                     for (const linkData of subgraphDef.links) {
@@ -463,7 +485,36 @@ function createNodeMap(workflow: any, prompt: any): Graph {
                                     }
                                 }
                             }
-                            inputProxies.set(`${instanceId}:${l.origin_slot}`, [`${subPrefix}${targetId}`, targetParam || l.target_slot]);
+
+                            // Resolve the internal input name that this subgraph input feeds
+                            const finalInputName = targetParam || l.target_slot;
+
+                            // Check whether this subgraph input is overridden by an
+                            // external link on the parent node (matched by name).
+                            const sgInputDef = subgraphDef.inputs?.[l.origin_slot];
+                            const parentInputs: any[] = wNode.inputs || [];
+                            const matchingParentInput = sgInputDef?.name
+                                ? parentInputs.find((pi: any) => pi.name === sgInputDef.name)
+                                : undefined;
+                            const isExternallyLinked = matchingParentInput?.link != null;
+
+                            // If the parent provides a widget value for this subgraph
+                            // input AND no external link overrides it, inject the
+                            // widget value directly into the internal target node.
+                            const mappedWidgetIdx = widgetIndexMap.get(l.origin_slot);
+                            if (mappedWidgetIdx !== undefined
+                                && !isExternallyLinked
+                                && wNode.widgets_values?.[mappedWidgetIdx] !== undefined
+                                && finalInputName !== undefined) {
+                                const fullTargetId = `${subPrefix}${targetId}`;
+                                const targetGraphNode = graph[fullTargetId];
+                                if (targetGraphNode) {
+                                    targetGraphNode.inputs[finalInputName] = wNode.widgets_values[mappedWidgetIdx];
+                                }
+                            } else {
+                                // Otherwise create an input proxy for top-level link resolution
+                                inputProxies.set(`${instanceId}:${l.origin_slot}`, [`${subPrefix}${targetId}`, finalInputName]);
+                            }
                         } else {
                             // Link interno-para-interno
                             const finalSourceId = `${subPrefix}${originId}`;
