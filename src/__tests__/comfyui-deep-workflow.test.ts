@@ -34,7 +34,7 @@ describe('ComfyUI Parser - Deep Workflow', () => {
               [37, 20, 0, 28, 0, "STRING"],
               [40, 28, 0, 6, 1, "STRING"],
               [42, 23, 0, 28, 2, "BOOLEAN"],
-              [19, 17, 0, 16, 0, "STRING"],
+              [19, 17, 0, 16, 4, "STRING"], // TextGenerate prompt input is slot 4 (clip, image, video, audio, prompt)
               [21, 18, 0, 17, 0, "STRING"],
               [22, 19, 0, 17, 1, "STRING"],
               [41, 6, 0, 3, 1, "CONDITIONING"]

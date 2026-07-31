@@ -70,12 +70,16 @@ function traverse(
   if (nodeDef.roles.includes('ROUTING') && nodeDef.conditional_routing) {
     const controlInputName = nodeDef.conditional_routing.control_input;
     let controlValue: any = null;
-    
-    // Tenta resolver o valor de controle, que pode ser um widget ou um link
-    const controlLink = currentNode.inputs[controlInputName];
-    if (controlLink && Array.isArray(controlLink)) {
-      const controlState = { ...createInitialState('steps'), visitedLinks: state.visitedLinks }; // 'steps' -> INT
-      controlValue = traverseFromLink(controlLink as NodeLink, controlState, graph, []);
+
+    // Tenta resolver o valor de controle, que pode ser um input direto (injetado
+    // por subgraph propagation), um link, ou um fallback para widgets_values.
+    const controlInput = currentNode.inputs[controlInputName];
+    if (controlInput !== undefined && controlInput !== null && !Array.isArray(controlInput)) {
+      // Direct value injected by subgraph widget propagation (e.g. BOOLEAN true/false)
+      controlValue = controlInput;
+    } else if (controlInput && Array.isArray(controlInput)) {
+      const controlState = { ...createInitialState('steps'), visitedLinks: state.visitedLinks };
+      controlValue = traverseFromLink(controlInput as NodeLink, controlState, graph, []);
     } else {
         const widgetValue = currentNode.widgets_values?.find(w => typeof w === 'object' ? w.name === controlInputName : false) ?? currentNode.widgets_values?.[0];
         controlValue = typeof widgetValue === 'object' ? widgetValue.value : widgetValue;
@@ -87,6 +91,10 @@ function traverse(
       if (targetLink && Array.isArray(targetLink)) {
         return traverseFromLink(targetLink as NodeLink, state, graph, accumulator);
       }
+      // Handle direct values (injected by subgraph widget propagation)
+      if (targetLink !== undefined && targetLink !== null && !Array.isArray(targetLink)) {
+        return targetLink;
+      }
     }
     return state.targetParam === 'lora' ? accumulator : null; // Rota dinâmica não encontrada
   }
@@ -94,8 +102,8 @@ function traverse(
   // 4. Travessia Estática (PASS_THROUGH / TRANSFORM)
   if (nodeDef.roles.includes('PASS_THROUGH') || nodeDef.roles.includes('TRANSFORM')) {
     // Procura por entradas ordenadas via pass_through_rules ou pelas chaves de inputs
-    const inputNames = nodeDef.pass_through_rules 
-        ? nodeDef.pass_through_rules.map(rule => rule.from_input) 
+    const inputNames = nodeDef.pass_through_rules
+        ? nodeDef.pass_through_rules.map(rule => rule.from_input)
         : Object.keys(nodeDef.inputs);
 
     for (const inputName of inputNames) {
@@ -108,6 +116,13 @@ function traverse(
            if (state.targetParam !== 'lora' && result !== null) {
                return result;
            }
+        }
+        // Handle direct string values injected by subgraph widget propagation.
+        // Must return immediately, BEFORE following further links, so the
+        // preference order in pass_through_rules (e.g. string_b before string_a)
+        // is respected even when a direct value and a link coexist.
+        if (inputLink !== undefined && inputLink !== null && !Array.isArray(inputLink) && typeof inputLink === 'string') {
+           return inputLink;
         }
       }
     }

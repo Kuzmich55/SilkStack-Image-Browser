@@ -396,6 +396,21 @@ function createNodeMap(workflow: any, prompt: any): Graph {
         (workflow?.definitions?.subgraphs || []).map((s: any) => [s.id, s])
     );
 
+    /**
+     * Resolves an input name for a node by slot index.
+     * Tries the NodeRegistry first, then falls back to the node's own JSON
+     * input definitions — needed for custom nodes whose real input list is
+     * longer than what the registry declares (e.g. TextGenerate).
+     */
+    const resolveInputNameBySlot = (node: any, slot: number): string | undefined => {
+        const nodeDef = NodeRegistry[node?.class_type];
+        if (nodeDef) {
+            const name = Object.keys(nodeDef.inputs)[slot];
+            if (name) return name;
+        }
+        return node?._json_inputs?.[slot]?.name;
+    };
+
     // 1. Função recursiva para construir o grafo e mapas de proxies
     const processNodes = (nodeList: any[], prefix = "") => {
         if (!nodeList) return;
@@ -477,13 +492,7 @@ function createNodeMap(workflow: any, prompt: any): Graph {
                             // Slot de entrada do subgrafo -> Destino interno
                             let targetParam = l.input_name;
                             if (!targetParam && typeof l.target_slot === 'number') {
-                                const targetNode = graph[`${subPrefix}${targetId}`];
-                                if (targetNode) {
-                                    const nodeDef = NodeRegistry[targetNode.class_type];
-                                    if (nodeDef) {
-                                        targetParam = Object.keys(nodeDef.inputs)[l.target_slot];
-                                    }
-                                }
+                                targetParam = resolveInputNameBySlot(graph[`${subPrefix}${targetId}`], l.target_slot);
                             }
 
                             // Resolve the internal input name that this subgraph input feeds
@@ -523,10 +532,7 @@ function createNodeMap(workflow: any, prompt: any): Graph {
                             if (targetNode) {
                                 let inputName = l.input_name;
                                 if (!inputName && typeof l.target_slot === 'number') {
-                                    const nodeDef = NodeRegistry[targetNode.class_type];
-                                    if (nodeDef) {
-                                        inputName = Object.keys(nodeDef.inputs)[l.target_slot];
-                                    }
+                                    inputName = resolveInputNameBySlot(targetNode, l.target_slot);
                                 }
                                 if (inputName) {
                                     targetNode.inputs[inputName] = [finalSourceId, l.origin_slot];
@@ -544,6 +550,11 @@ function createNodeMap(workflow: any, prompt: any): Graph {
                     inputs: {},
                     widgets_values: wNode.widgets_values || [],
                     mode: wNode.mode || 0,
+                    // Keep the node's own input definitions (name + slot order) so
+                    // slot-based name resolution can fall back to them when the
+                    // registry doesn't declare the full input list (e.g. custom
+                    // nodes like TextGenerate with more inputs than registered).
+                    _json_inputs: wNode.inputs || [],
                 };
             }
         }
@@ -606,10 +617,7 @@ function createNodeMap(workflow: any, prompt: any): Graph {
                 if (targetNode) {
                     // Tenta resolver o nome do input a partir do slot se estiver faltando (comum em arquivos .json)
                     if (!inputName && typeof targetSlot === 'number') {
-                        const nodeDef = NodeRegistry[targetNode.class_type];
-                        if (nodeDef) {
-                            inputName = Object.keys(nodeDef.inputs)[targetSlot];
-                        }
+                        inputName = resolveInputNameBySlot(targetNode, targetSlot);
                     }
                     if (inputName) {
                         targetNode.inputs[inputName] = [finalSourceId, finalSourceSlot];

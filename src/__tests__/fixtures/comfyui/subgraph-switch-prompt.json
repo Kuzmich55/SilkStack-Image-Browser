@@ -1,0 +1,215 @@
+{
+  "workflow": {
+    "nodes": [
+      {
+        "id": 152,
+        "type": "0e77a857-dcbf-4884-8942-b2b6e02d3f3c",
+        "mode": 0,
+        "inputs": [
+          { "name": "vae", "type": "VAE", "link": 374 },
+          { "name": "clip", "type": "CLIP", "link": 311 },
+          { "name": "model", "type": "MODEL", "link": 309 },
+          { "label": "text", "name": "text_1", "type": "STRING", "link": null },
+          { "label": "prompt_enhance", "name": "switch", "type": "BOOLEAN", "link": null }
+        ],
+        "outputs": [
+          { "label": "IMAGE", "name": "IMAGE_1", "type": "IMAGE", "links": [301] },
+          { "name": "generated_text", "type": "STRING", "links": [388] }
+        ],
+        "properties": {},
+        "widgets_values": [
+          "A whimsical watercolor painting of a beautiful woman standing outdoors. long thick wavy dark hair elegant saree with modern styling simple jewelry and bangles poised confident posture Kerala greenery and rustic architecture warm tropical sunlight",
+          "ugly, bad, blurred, watermark, dithered",
+          "5:7 (Balanced Portrait)",
+          "2.0",
+          1,
+          8,
+          "euler",
+          "normal",
+          1.5,
+          true
+        ]
+      },
+      {
+        "id": 158,
+        "type": "PreviewImage",
+        "mode": 0,
+        "inputs": [ { "name": "images", "type": "IMAGE", "link": 301 } ],
+        "properties": {},
+        "widgets_values": []
+      }
+    ],
+    "links": [
+      [301, 152, 0, 158, 0, "IMAGE"]
+    ],
+    "definitions": {
+      "subgraphs": [
+        {
+          "id": "0e77a857-dcbf-4884-8942-b2b6e02d3f3c",
+          "version": 1,
+          "config": {},
+          "name": "Krea Generate",
+          "inputNode": { "id": -10 },
+          "outputNode": { "id": -20 },
+          "inputs": [
+            { "id": "c09add67-9841-4320-96cf-a2e1df925306", "name": "vae", "type": "VAE", "linkIds": [274] },
+            { "id": "03fc2949-7830-4fb3-bdaf-38e0389481c3", "name": "clip", "type": "CLIP", "linkIds": [276, 277, 389] },
+            { "id": "bad4d0f9-16d3-4db9-bc07-b2a22f673bb4", "name": "model", "type": "MODEL", "linkIds": [304] },
+            { "id": "ea4103a3-7f7f-4fb2-971c-dd64351ac6fc", "name": "text", "type": "STRING", "linkIds": [383, 386] },
+            { "id": "e4372b96-1355-4321-86c5-556f0301cc07", "name": "text_1", "type": "STRING", "linkIds": [327], "label": "text" },
+            { "id": "6169b41f-ee4f-4202-80fe-d12cb3e6fecf", "name": "aspect_ratio", "type": "COMBO", "linkIds": [328] },
+            { "id": "4061d56a-8885-4653-a139-f5bedb0c52ce", "name": "megapixel", "type": "COMBO", "linkIds": [329] },
+            { "id": "ca756fff-4dfa-46af-b047-f9bcebb197c6", "name": "batch_size", "type": "INT", "linkIds": [330] },
+            { "id": "6118661f-ec6d-4666-b571-40a8a8ee4ffb", "name": "steps", "type": "INT", "linkIds": [331] },
+            { "id": "25f95fbf-95c5-45e2-b1b7-3c48e4b8acc0", "name": "sampler_name", "type": "COMBO", "linkIds": [332] },
+            { "id": "1ce318bc-f8a1-47a6-9050-a850926f1907", "name": "scheduler", "type": "COMBO", "linkIds": [333] },
+            { "id": "297fdc7d-eff1-4ce4-b52a-e74d6ce2dee9", "name": "cfg", "type": "FLOAT", "linkIds": [335] },
+            { "id": "00f51f65-8baa-492a-a608-de7d95e48db4", "name": "switch", "type": "BOOLEAN", "linkIds": [382], "label": "prompt_enhance" }
+          ],
+          "outputs": [
+            { "id": "70aeb949-5ec0-46dd-8f7c-5cf327226543", "name": "IMAGE_1", "type": "IMAGE", "linkIds": [271], "label": "IMAGE" },
+            { "id": "1d940b4c-a7cc-4ee4-8f48-77f75e5dcd34", "name": "generated_text", "type": "STRING", "linkIds": [387] }
+          ],
+          "widgets": [],
+          "nodes": [
+            {
+              "id": 143,
+              "type": "VAEDecode",
+              "mode": 0,
+              "inputs": [
+                { "name": "samples", "type": "LATENT", "link": 259 },
+                { "name": "vae", "type": "VAE", "link": 274 }
+              ],
+              "properties": {},
+              "widgets_values": []
+            },
+            {
+              "id": 145,
+              "type": "CLIPTextEncode",
+              "mode": 0,
+              "inputs": [
+                { "name": "clip", "type": "CLIP", "link": 276 },
+                { "name": "text", "type": "STRING", "link": 384 }
+              ],
+              "properties": {},
+              "widgets_values": [
+                "ye-pop\nyear 2025, newest, masterpiece, best quality, score_9, highres, absurdres, very aesthetic, safe for SFW, 1cat, tom cat, tom and jerry, classic 2d cartoon style, grey fur, closed eyes, tilted head up, rain, overcast sky, gloomy atmosphere, @shirabii, @neco. Tom the cat stands frozen, his head tilted back towards the dark sky with his eyes closed in quiet sadness. The background is a soft, out-of-focus blur of gloomy grey storm clouds and streaks of rain. The lighting is cold and diffuse, accentuating his classic 2D cartoon silhouette and the reflective texture of the water pooling on his shoulders.\n"
+              ],
+              "title": "CLIP Text Encode (Positive Prompt)"
+            },
+            {
+              "id": 146,
+              "type": "CLIPTextEncode",
+              "mode": 0,
+              "inputs": [
+                { "name": "clip", "type": "CLIP", "link": 277 },
+                { "name": "text", "type": "STRING", "link": 327 }
+              ],
+              "properties": {},
+              "widgets_values": [
+                "ugly, bad, blurred, watermark, dithered"
+              ],
+              "title": "CLIP Text Encode (Negative Prompt)"
+            },
+            {
+              "id": 150,
+              "type": "KSampler",
+              "mode": 0,
+              "inputs": [
+                { "name": "model", "type": "MODEL", "link": 312 },
+                { "name": "positive", "type": "CONDITIONING", "link": 262 },
+                { "name": "negative", "type": "CONDITIONING", "link": 263 },
+                { "name": "latent_image", "type": "LATENT", "link": 264 }
+              ],
+              "properties": {},
+              "widgets_values": [
+                261856422814521,
+                "randomize",
+                10,
+                1.5,
+                "euler",
+                "normal",
+                1
+              ]
+            },
+            {
+              "id": 209,
+              "type": "StringConcatenate",
+              "mode": 0,
+              "inputs": [
+                { "name": "string_a", "type": "STRING", "link": 379 },
+                { "name": "string_b", "type": "STRING", "link": 386 }
+              ],
+              "properties": {},
+              "widgets_values": ["", "", ""]
+            },
+            {
+              "id": 210,
+              "type": "PrimitiveStringMultiline",
+              "mode": 0,
+              "inputs": [],
+              "properties": {},
+              "widgets_values": [
+                "You are an expert prompt engineer for text-to-image models. Your task is to expand the user prompt into a highly effective image-generation prompt. Think step by step about the request before writing the answer. Follow these rules strictly: preserve all original subjects, actions, colors, and spatial relationships. Write one cohesive paragraph. User Input:"
+              ]
+            },
+            {
+              "id": 212,
+              "type": "TextGenerate",
+              "mode": 0,
+              "inputs": [
+                { "name": "clip", "type": "CLIP", "link": 389 },
+                { "name": "prompt", "type": "STRING", "link": 381 }
+              ],
+              "properties": {},
+              "widgets_values": ["", 1024, "on", 0.7, 64, 0.95]
+            },
+            {
+              "id": 213,
+              "type": "ComfySwitchNode",
+              "mode": 0,
+              "inputs": [
+                { "name": "on_false", "type": "STRING", "link": 383 },
+                { "name": "on_true", "type": "STRING", "link": 385 },
+                { "name": "switch", "type": "BOOLEAN", "link": 382 }
+              ],
+              "properties": {},
+              "widgets_values": [false]
+            }
+          ],
+          "groups": [],
+          "links": [
+            { "id": 259, "origin_id": 150, "origin_slot": 0, "target_id": 143, "target_slot": 0, "type": "LATENT" },
+            { "id": 262, "origin_id": 145, "origin_slot": 0, "target_id": 150, "target_slot": 1, "type": "CONDITIONING" },
+            { "id": 263, "origin_id": 146, "origin_slot": 0, "target_id": 150, "target_slot": 2, "type": "CONDITIONING" },
+            { "id": 264, "origin_id": 144, "origin_slot": 0, "target_id": 150, "target_slot": 3, "type": "LATENT" },
+            { "id": 271, "origin_id": 143, "origin_slot": 0, "target_id": -20, "target_slot": 0, "type": "IMAGE" },
+            { "id": 274, "origin_id": -10, "origin_slot": 0, "target_id": 143, "target_slot": 1, "type": "VAE" },
+            { "id": 276, "origin_id": -10, "origin_slot": 1, "target_id": 145, "target_slot": 0, "type": "CLIP" },
+            { "id": 277, "origin_id": -10, "origin_slot": 1, "target_id": 146, "target_slot": 0, "type": "CLIP" },
+            { "id": 304, "origin_id": -10, "origin_slot": 2, "target_id": 150, "target_slot": 0, "type": "MODEL" },
+            { "id": 312, "origin_id": 160, "origin_slot": 0, "target_id": 150, "target_slot": 0, "type": "MODEL" },
+            { "id": 327, "origin_id": -10, "origin_slot": 4, "target_id": 146, "target_slot": 1, "type": "STRING" },
+            { "id": 328, "origin_id": -10, "origin_slot": 5, "target_id": 149, "target_slot": 1, "type": "COMBO" },
+            { "id": 329, "origin_id": -10, "origin_slot": 6, "target_id": 149, "target_slot": 0, "type": "COMBO" },
+            { "id": 330, "origin_id": -10, "origin_slot": 7, "target_id": 144, "target_slot": 2, "type": "INT" },
+            { "id": 331, "origin_id": -10, "origin_slot": 8, "target_id": 150, "target_slot": 4, "type": "INT" },
+            { "id": 332, "origin_id": -10, "origin_slot": 9, "target_id": 150, "target_slot": 6, "type": "COMBO" },
+            { "id": 333, "origin_id": -10, "origin_slot": 10, "target_id": 150, "target_slot": 7, "type": "COMBO" },
+            { "id": 335, "origin_id": -10, "origin_slot": 11, "target_id": 150, "target_slot": 5, "type": "FLOAT" },
+            { "id": 379, "origin_id": 210, "origin_slot": 0, "target_id": 209, "target_slot": 0, "type": "STRING" },
+            { "id": 381, "origin_id": 209, "origin_slot": 0, "target_id": 212, "target_slot": 4, "type": "STRING" },
+            { "id": 382, "origin_id": -10, "origin_slot": 12, "target_id": 213, "target_slot": 2, "type": "BOOLEAN" },
+            { "id": 383, "origin_id": -10, "origin_slot": 3, "target_id": 213, "target_slot": 0, "type": "STRING" },
+            { "id": 384, "origin_id": 213, "origin_slot": 0, "target_id": 145, "target_slot": 1, "type": "STRING" },
+            { "id": 385, "origin_id": 212, "origin_slot": 0, "target_id": 213, "target_slot": 1, "type": "STRING" },
+            { "id": 386, "origin_id": -10, "origin_slot": 3, "target_id": 209, "target_slot": 1, "type": "STRING" },
+            { "id": 387, "origin_id": 212, "origin_slot": 0, "target_id": -20, "target_slot": 1, "type": "STRING" },
+            { "id": 389, "origin_id": -10, "origin_slot": 1, "target_id": 212, "target_slot": 0, "type": "CLIP" }
+          ],
+          "extra": {}
+        }
+      ]
+    }
+  }
+}

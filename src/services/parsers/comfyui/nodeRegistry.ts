@@ -23,6 +23,10 @@ export interface ParserNode {
   inputs: Record<string, any[] | any>;
   widgets_values?: any[];
   mode?: number; // Para detectar nós silenciados (0: ativo, 2/4: mudo/bypass)
+  // Original input definitions from the workflow JSON (name + slot order).
+  // Used as a fallback for slot-based input-name resolution when the
+  // registry doesn't declare the full input list (e.g. custom nodes).
+  _json_inputs?: any;
 }
 
 export type ComfyNodeDataType =
@@ -756,7 +760,16 @@ export const NodeRegistry: Record<string, NodeDefinition> = {
 
   TextGenerate: {
     category: 'TRANSFORM', roles: ['PASS_THROUGH'],
-    inputs: { prompt: { type: 'ANY' } },
+    // Real node has 5 inputs in this order: clip, image, video, audio, prompt.
+    // Declaring all of them keeps slot-based input-name resolution correct
+    // (Object.keys order must match the node's actual input order).
+    inputs: {
+      clip: { type: 'CLIP' },
+      image: { type: 'IMAGE' },
+      video: { type: 'IMAGE' },
+      audio: { type: 'ANY' },
+      prompt: { type: 'ANY' }
+    },
     outputs: { generated_text: { type: 'STRING' } },
     param_mapping: { prompt: { source: 'trace', input: 'prompt' } },
     pass_through_rules: [{ from_input: 'prompt', to_output: 'generated_text' }]

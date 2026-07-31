@@ -2046,9 +2046,23 @@ const ImageModal: React.FC<ImageModalProps> = ({
               </div>
             </div>
             {metadataViewMode === "json" && (
-              <pre className="bg-black/50 p-2 rounded-lg text-xs text-gray-300 whitespace-pre-wrap break-all max-h-64 overflow-y-auto mt-2">
-                {JSON.stringify(image.metadata, null, 2)}
-              </pre>
+              <div className="relative mt-2">
+                <pre className="bg-black/50 p-2 pr-8 rounded-lg text-xs text-gray-300 whitespace-pre-wrap break-all max-h-64 overflow-y-auto">
+                  {JSON.stringify(image.metadata, null, 2)}
+                </pre>
+                <button
+                  onClick={() =>
+                    copyToClipboard(
+                      JSON.stringify(image.metadata, null, 2),
+                      "JSON",
+                    )
+                  }
+                  className="absolute top-2 right-2 bg-gray-700/80 hover:bg-gray-600 text-gray-300 hover:text-white p-1 rounded transition-all duration-200"
+                  title="Copy JSON"
+                >
+                  <Copy className="w-3 h-3" />
+                </button>
+              </div>
             )}
             {metadataViewMode === "fulljson" && (
               <>
@@ -2057,9 +2071,23 @@ const ImageModal: React.FC<ImageModalProps> = ({
                     Loading raw metadata from file...
                   </div>
                 ) : fullRawMetadata ? (
-                  <pre className="bg-black/50 p-2 rounded-lg text-xs text-gray-300 whitespace-pre-wrap break-all max-h-64 overflow-y-auto mt-2">
-                    {JSON.stringify(fullRawMetadata, null, 2)}
-                  </pre>
+                  <div className="relative mt-2">
+                    <pre className="bg-black/50 p-2 pr-8 rounded-lg text-xs text-gray-300 whitespace-pre-wrap break-all max-h-64 overflow-y-auto">
+                      {JSON.stringify(fullRawMetadata, null, 2)}
+                    </pre>
+                    <button
+                      onClick={() =>
+                        copyToClipboard(
+                          JSON.stringify(fullRawMetadata, null, 2),
+                          "Full JSON",
+                        )
+                      }
+                      className="absolute top-2 right-2 bg-gray-700/80 hover:bg-gray-600 text-gray-300 hover:text-white p-1 rounded transition-all duration-200"
+                      title="Copy Full JSON"
+                    >
+                      <Copy className="w-3 h-3" />
+                    </button>
+                  </div>
                 ) : (
                   <div className="bg-yellow-900/50 border border-yellow-700 text-yellow-300 px-3 py-2 rounded-lg text-xs mt-2">
                     Unable to load raw metadata. The file may not contain
