@@ -389,8 +389,9 @@ function extractComfyVersion(workflow: any, prompt: any): string | null {
  */
 function createNodeMap(workflow: any, prompt: any): Graph {
     const graph: Graph = {};
-    const outputProxies = new Map<string, [string, number]>(); // "instanceId:slot" -> [internalNodeId, internalSlot]
-    const inputProxies = new Map<string, [string, any]>();     // "instanceId:slot" -> [internalNodeId, internalSlotOrName]
+    const outputProxies = new Map<string, [string, number]>();       // "instanceId:slot" -> [internalNodeId, internalSlot]
+    const inputProxies = new Map<string, [string, any][]>();        // "instanceId:slot" -> Array of [internalNodeId, internalSlotOrName]
+                                                                   // Array supports fan-out: one subgraph input → many internal nodes
 
     const subgraphs = new Map<string, any>(
         (workflow?.definitions?.subgraphs || []).map((s: any) => [s.id, s])
@@ -522,7 +523,9 @@ function createNodeMap(workflow: any, prompt: any): Graph {
                                 }
                             } else {
                                 // Otherwise create an input proxy for top-level link resolution
-                                inputProxies.set(`${instanceId}:${l.origin_slot}`, [`${subPrefix}${targetId}`, finalInputName]);
+                                const proxyKey = `${instanceId}:${l.origin_slot}`;
+                                if (!inputProxies.has(proxyKey)) inputProxies.set(proxyKey, []);
+                                inputProxies.get(proxyKey)!.push([`${subPrefix}${targetId}`, finalInputName]);
                             }
                         } else {
                             // Link interno-para-interno
@@ -606,11 +609,13 @@ function createNodeMap(workflow: any, prompt: any): Graph {
             // Resolve destino através de proxies de entrada
             const targetProxyKey = `${targetId}:${targetSlot}`;
             if (inputProxies.has(targetProxyKey)) {
-                const [intTargetId, intTargetSlotOrName] = inputProxies.get(targetProxyKey)!;
-                const targetNode = graph[intTargetId];
-                if (targetNode) {
-                    const finalInputName = typeof intTargetSlotOrName === 'string' ? intTargetSlotOrName : inputName;
-                    targetNode.inputs[finalInputName] = [finalSourceId, finalSourceSlot];
+                const entries = inputProxies.get(targetProxyKey)!;
+                for (const [intTargetId, intTargetSlotOrName] of entries) {
+                    const targetNode = graph[intTargetId];
+                    if (targetNode) {
+                        const finalInputName = typeof intTargetSlotOrName === 'string' ? intTargetSlotOrName : inputName;
+                        targetNode.inputs[finalInputName] = [finalSourceId, finalSourceSlot];
+                    }
                 }
             } else {
                 const targetNode = graph[targetId];
