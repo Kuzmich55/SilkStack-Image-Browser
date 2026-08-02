@@ -27,6 +27,47 @@ const pkg = require("../package.json");
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// =============================================================================
+// Electron runtime guard
+// If this file is executed under plain Node — e.g. ELECTRON_RUN_AS_NODE=1 is
+// present in the environment — the `electron` module does not expose the
+// Electron API: it resolves to a path string (plain Node) or to a stub object
+// with only `process` (RUN_AS_NODE mode), so `app` is undefined and the code
+// below would crash with a cryptic TypeError before any window opens.
+// Detect that state and self-heal by relaunching under the real Electron
+// runtime, or fail with a clear message if that is not possible.
+// =============================================================================
+if (!app) {
+  if (process.env.ELECTRON_RUN_AS_NODE) {
+    // Remove the variable entirely (an empty value still counts as set) and
+    // re-execute this same entry point under the real Electron binary.
+    delete process.env.ELECTRON_RUN_AS_NODE;
+    const relaunched = spawn(process.execPath, process.argv.slice(1), {
+      stdio: "inherit",
+      env: process.env,
+    });
+    relaunched.on("error", (err) => {
+      console.error(
+        "Failed to relaunch SilkStack under the Electron runtime:",
+        err,
+      );
+      process.exit(1);
+    });
+    // Stay alive as a wrapper until the real app exits so stdio stays
+    // connected and the parent shell doesn't see a premature exit.
+    // (Top-level await blocks the rest of the module from running here.)
+    const [exitCode] = await new Promise((resolve) =>
+      relaunched.on("close", (...args) => resolve(args)),
+    );
+    process.exit(exitCode ?? 0);
+  }
+  console.error(
+    "SilkStack must be launched with the Electron runtime, not plain Node.\n" +
+      "If you see this from a terminal, unset ELECTRON_RUN_AS_NODE and try again.",
+  );
+  process.exit(1);
+}
+
 // Simple development check
 const isDev =
   process.env.NODE_ENV === "development" ||

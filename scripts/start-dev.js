@@ -56,10 +56,17 @@ function startElectron(args) {
   if (args.length > 0) {
     console.log('   📁 with arguments:', args.join(' '));
   }
-  
+
+  // ELECTRON_RUN_AS_NODE makes the Electron binary act as plain Node, which
+  // breaks the app at startup (no window ever opens). Remove it entirely from
+  // the child environment so the app always launches as a real Electron app.
+  const env = { ...process.env };
+  delete env.ELECTRON_RUN_AS_NODE;
+
   electronProcess = spawn('electron', ['.', ...args], {
     stdio: 'inherit',
     shell: true,
+    env,
   });
 
   electronProcess.on('close', (code) => {
