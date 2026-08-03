@@ -26,6 +26,8 @@ type WorkerMessage =
         images: TaggingImage[];
         topN?: number;
         disableFallback?: boolean;
+        /** Set by main thread — true when the user has a valid premium license. */
+        isPremium?: boolean;
       };
     }
   | { type: 'cancel' };
@@ -66,6 +68,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
       await startAutoTagging(message.payload.images, {
         topN: message.payload.topN,
         disableFallback: message.payload.disableFallback,
+        isPremium: message.payload.isPremium,
       });
       break;
     case 'cancel':
@@ -75,7 +78,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
   }
 };
 
-async function initLLM(): Promise<boolean> {
+async function initLLM(isPremium?: boolean): Promise<boolean> {
   if (llmGenerator) return true;
 
   postProgress(0, 0, 'Loading tag generation model...');
@@ -88,6 +91,7 @@ async function initLLM(): Promise<boolean> {
           postProgress(report.progress, 0, `Loading model: ${report.text}`);
         }
       },
+      { skipPremiumCheck: isPremium },
     );
 
     if (!llmGenerator) {
@@ -110,22 +114,22 @@ async function initLLM(): Promise<boolean> {
   return false;
 }
 
-async function getFallbackGenerator(): Promise<ITagGenerator> {
+async function getFallbackGenerator(isPremium?: boolean): Promise<ITagGenerator> {
   if (!fallbackGenerator) {
-    fallbackGenerator = await createTagGenerator();
+    fallbackGenerator = await createTagGenerator({ skipPremiumCheck: isPremium });
   }
   return fallbackGenerator;
 }
 
 async function startAutoTagging(
   images: TaggingImage[],
-  options: { topN?: number; disableFallback?: boolean },
+  options: { topN?: number; disableFallback?: boolean; isPremium?: boolean },
 ): Promise<void> {
   try {
     isCancelled = false;
 
     // Try LLM first; fall back to rule-based if WebGPU/model unavailable
-    const llmReady = await initLLM();
+    const llmReady = await initLLM(options.isPremium);
 
     if (isCancelled) return;
 
@@ -152,7 +156,7 @@ async function startAutoTagging(
         if (llmReady && llmGenerator) {
           generatedTags = await llmGenerator.generateTagsFromPrompt(prompt);
         } else {
-          const fb = await getFallbackGenerator();
+          const fb = await getFallbackGenerator(options.isPremium);
           generatedTags = await fb.generateTagsFromPrompt(prompt);
         }
       }

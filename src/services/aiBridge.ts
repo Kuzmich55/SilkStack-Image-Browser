@@ -95,8 +95,15 @@ let aiModule: Record<string, unknown> | null = null;
  * singleton is guaranteed to exist.
  */
 async function checkPremiumLicense(): Promise<boolean> {
-  const { isPremiumUnlocked } = await import('../services/aiFeatureAccess');
-  return isPremiumUnlocked();
+  try {
+    const { isPremiumUnlocked } = await import('../services/aiFeatureAccess');
+    return isPremiumUnlocked();
+  } catch {
+    // Dynamic import failed — likely running in a context where the settings
+    // store cannot be initialized (e.g. a Web Worker without `window`).
+    // Premium features are unavailable; callers fall back to free alternatives.
+    return false;
+  }
 }
 let loadAttempted = false;
 let loadError: string | null = null;
@@ -134,9 +141,13 @@ async function loadAiModule(): Promise<Record<string, unknown> | null> {
 export async function createLLMTagGenerator(
   modelId: string = TAG_GENERATION_MODEL_ID,
   onProgress?: (report: LoadProgressReport) => void,
+  opts?: { skipPremiumCheck?: boolean },
 ): Promise<ILLMTagGenerator | null> {
-  // Premium gate: LLM-based tag generation requires a valid license
-  if (!(await checkPremiumLicense())) return null;
+  // Premium gate: LLM-based tag generation requires a valid license.
+  // Trusted callers (e.g. the auto-tagging worker) may skip this check when
+  // the main thread has already verified premium status — the worker's own
+  // Zustand store is a separate instance and cannot see the user's license.
+  if (!opts?.skipPremiumCheck && !(await checkPremiumLicense())) return null;
 
   const mod = await loadAiModule();
   if (!mod) return null;
@@ -161,10 +172,14 @@ export async function createLLMTagGenerator(
  * The closed-source TagGenerator is a premium feature — it must not be
  * reachable without a license, even though the built-in fallback is free.
  */
-export async function createTagGenerator(): Promise<ITagGenerator> {
+export async function createTagGenerator(
+  opts?: { skipPremiumCheck?: boolean },
+): Promise<ITagGenerator> {
   // Premium gate: the closed-source TagGenerator requires a license.
   // Without one, skip the module entirely and use the built-in extractor.
-  if (await checkPremiumLicense()) {
+  // Trusted callers (e.g. the auto-tagging worker) may skip the check when
+  // the main thread has already verified premium status.
+  if (opts?.skipPremiumCheck || await checkPremiumLicense()) {
     const mod = await loadAiModule();
 
     if (mod) {

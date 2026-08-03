@@ -2079,6 +2079,9 @@ export const useImageStore = create<ImageState>((set, get) => {
                     topN: options?.topN,
                     minScore: options?.minScore,
                     disableFallback: disableAiFallback,
+                    // The worker cannot check premium itself — its Zustand store
+                    // is a separate instance without the user's license data.
+                    isPremium: isAiFeaturesEnabled(),
                 },
             });
         },

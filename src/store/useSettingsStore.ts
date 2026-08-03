@@ -124,8 +124,11 @@ interface SettingsState {
   resetState: () => void;
 }
 
-// Check if running in Electron
-const isElectron = !!window.electronAPI;
+// Check if running in Electron.
+// Guard against missing `window` — this module may be imported in a Web Worker
+// context (e.g. by the auto-tagging worker via aiBridge → aiFeatureAccess),
+// where `window` is undefined and `self` is the global scope.
+const isElectron = typeof window !== 'undefined' && !!window.electronAPI;
 
 import { getDefaultKeymap } from '../services/hotkeyConfig';
 

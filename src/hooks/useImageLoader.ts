@@ -615,6 +615,18 @@ export function useImageLoader() {
         );
         if (!suppressIndexingState) {
           setLoading(false);
+          // Transition through completed → idle so indexingState doesn't
+          // stay stuck as 'indexing' forever (e.g. for empty folders).
+          setIndexingState("completed");
+          if (completedTimeoutRef.current) {
+            clearTimeout(completedTimeoutRef.current);
+          }
+          completedTimeoutRef.current = setTimeout(() => {
+            setIndexingState("idle");
+            setProgress(null);
+            delete (window as any)[finalizationKey];
+            completedTimeoutRef.current = null;
+          }, 3000);
         } else {
           setDirectoryRefreshing(directory.id, false);
           setProgress(null);

@@ -61,8 +61,6 @@ export default function App() {
   const clustersCount = useImageStore((state) => state.clusters.length);
 
   // Loading & progress selectors
-  const isLoading = useImageStore((state) => state.isLoading);
-  const progress = useImageStore((state) => state.progress);
   const indexingState = useImageStore((state) => state.indexingState);
   const enrichmentProgress = useImageStore((state) => state.enrichmentProgress);
   const focusedImageIndex = useImageStore((state) => state.focusedImageIndex);
@@ -1010,26 +1008,6 @@ export default function App() {
                     >
                       <X size={16} />
                     </button>
-                  </div>
-                </div>
-              )}
-
-              {indexingState === 'indexing' && (
-                <div className="mx-6 p-4 mb-4 bg-gray-800/50 rounded-lg border border-gray-700">
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="text-sm text-gray-300 font-medium flex items-center gap-2">
-                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                      Indexing library...
-                    </span>
-                    <span className="text-sm text-gray-400 font-mono">
-                      {progress?.current ?? 0} / {progress?.total ?? 0}
-                    </span>
-                  </div>
-                  <div className="w-full bg-gray-700 rounded-full h-2 overflow-hidden shadow-inner">
-                    <div 
-                      className="bg-blue-500 h-full transition-all duration-300 shadow-[0_0_10px_rgba(59,130,246,0.5)]" 
-                      style={{ width: `${((progress?.current ?? 0) / (progress?.total || 1)) * 100}%` }}
-                    />
                   </div>
                 </div>
               )}
