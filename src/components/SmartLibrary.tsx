@@ -3,7 +3,8 @@ import { Layers } from 'lucide-react';
 import { useImageStore } from '../store/useImageStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useImageStacking } from '../hooks/useImageStacking';
-import { ImageStack, IndexedImage, LibraryStackContext } from '../types';
+import { useImageSelection } from '../hooks/useImageSelection';
+import { ImageStack } from '../types';
 import StackCard from './StackCardWrapper';
 import SimilarityStackExpandedView from './SimilarityStackExpandedViewWrapper';
 import Footer from './Footer';
@@ -21,6 +22,10 @@ const Stacks: React.FC<StacksProps> = () => {
   const enrichmentProgress = useImageStore((state) => state.enrichmentProgress);
   const similarityGroupProgress = useImageStore((state) => state.similarityGroupProgress);
   const directories = useImageStore((state) => state.directories);
+
+  // Use the same selection handler as the library grid so image clicks
+  // correctly open the viewer window (Electron) or in-app modal (browser).
+  const { handleImageSelection } = useImageSelection();
 
   const imageSize = useSettingsStore((state) => state.viewZoomLevels.smart);
   const { viewMode, toggleViewMode } = useSettingsStore();
@@ -116,17 +121,6 @@ const Stacks: React.FC<StacksProps> = () => {
     startAutoTagging(primaryPath, false);
   };
 
-  const handleImageClick = (image: IndexedImage, event: React.MouseEvent) => {
-    // Delegate to the global image selection handler — this is handled by
-    // the parent App component. Stacks drill-down view receives
-    // onImageClick from App.tsx context.
-    // For now, we use the store's setSelectedImage directly.
-    const { setSelectedImage, setFocusedImageIndex, filteredImages: storeFiltered } = useImageStore.getState();
-    const clickedIndex = storeFiltered.findIndex(img => img.id === image.id);
-    if (clickedIndex !== -1) setFocusedImageIndex(clickedIndex);
-    setSelectedImage(image);
-  };
-
   return (
     <section ref={sectionRef} className="flex flex-col h-full min-h-0 pt-3">
       {/* Drill-down view — replaces the grid content, Footer stays below */}
@@ -135,7 +129,7 @@ const Stacks: React.FC<StacksProps> = () => {
           <SimilarityStackExpandedView
             images={activeStack.images}
             subGroups={drillDownSubGroups}
-            onImageClick={handleImageClick}
+            onImageClick={handleImageSelection}
             selectedImages={new Set()}
             onBack={handleCloseStack}
             imageSize={imageSize}
