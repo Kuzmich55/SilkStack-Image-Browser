@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.0.0] - 2026-08-03
+
+_Release notes to be added._
+
 ## [1.1.2] - 2026-04-20
 
 - Updated **axios** to latest version (1.15.1) for security and performance
