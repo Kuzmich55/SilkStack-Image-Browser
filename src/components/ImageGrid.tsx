@@ -135,6 +135,11 @@ const ImageCard: React.FC<ImageCardProps> = React.memo(({ image, onImageClick, i
   const canDragExternally = typeof window !== 'undefined' && !!window.electronAPI?.startFileDrag;
   const isVideo = isVideoFileName(image.name, image.fileType);
 
+  // Track mouse movement to distinguish click from drag: suppress onClick when
+  // the pointer has moved more than a few pixels between mousedown and mouseup.
+  const mouseDownPos = useRef<{ x: number; y: number } | null>(null);
+  const isDragging = useRef(false);
+
   // Extract filename to display based on showFullFilePath setting
   const displayName = (image.name || '').split(/[/\\]/).pop() || 'Unknown';
 
@@ -296,6 +301,32 @@ const ImageCard: React.FC<ImageCardProps> = React.memo(({ image, onImageClick, i
     clearDraggedItems();
   };
 
+  // Distinguish click from drag: track pointer movement on the card.
+  // If the pointer moves more than 5px between mousedown and mouseup,
+  // suppress the onClick so the image doesn't open on a drag gesture.
+  const handleCardMouseDown = (e: React.MouseEvent) => {
+    mouseDownPos.current = { x: e.clientX, y: e.clientY };
+    isDragging.current = false;
+  };
+
+  const handleCardMouseMove = (e: React.MouseEvent) => {
+    if (!mouseDownPos.current) return;
+    const dx = Math.abs(e.clientX - mouseDownPos.current.x);
+    const dy = Math.abs(e.clientY - mouseDownPos.current.y);
+    if (dx > 5 || dy > 5) {
+      isDragging.current = true;
+      mouseDownPos.current = null; // Reset so subsequent moves are no-ops
+    }
+  };
+
+  const handleCardClick = (e: React.MouseEvent) => {
+    if (isDragging.current) {
+      isDragging.current = false;
+      return;
+    }
+    onImageClick(image, e);
+  };
+
   return (
     <div className="flex flex-col items-center h-full" style={{ width: `${baseWidth}px` }}>
 
@@ -309,7 +340,9 @@ const ImageCard: React.FC<ImageCardProps> = React.memo(({ image, onImageClick, i
           isFocused ? 'outline-2 outline-dashed outline-blue-400 outline-offset-2 z-10' : ''
         }`}
         style={{ width: '100%', height: '100%', flexShrink: 0 }}
-        onClick={(e) => onImageClick(image, e)}
+        onClick={handleCardClick}
+        onMouseDown={handleCardMouseDown}
+        onMouseMove={handleCardMouseMove}
         onContextMenu={(e) => onContextMenu && onContextMenu(image, e)}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
