@@ -1,6 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useAiFeaturesEnabled } from '../services/aiFeatureAccess';
 
 interface MenuItem {
   label: string;
@@ -30,6 +31,8 @@ const CustomMenuBar: React.FC<CustomMenuBarProps> = ({
   onUndo,
   hasUndo = false,
 }) => {
+  // Runtime gate: the merge-Undo menu item requires premium license
+  const aiFeaturesEnabled = useAiFeaturesEnabled();
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const isElectron = typeof window !== 'undefined' && !!(window as any).electronAPI;
@@ -60,7 +63,7 @@ const CustomMenuBar: React.FC<CustomMenuBarProps> = ({
         { label: 'Add Folder...', shortcut: 'Ctrl+O', onClick: () => onAddFolder() },
         { label: 'Reload', shortcut: 'Ctrl+R', onClick: () => window.location.reload() },
         { type: 'separator' } as MenuItem,
-        ...(import.meta.env.VITE_AI_FEATURES_AVAILABLE
+        ...(aiFeaturesEnabled
           ? [
               { label: 'Undo', shortcut: 'Ctrl+Z', onClick: () => onUndo?.(), disabled: !hasUndo } as MenuItem,
               { type: 'separator' as const } as MenuItem,

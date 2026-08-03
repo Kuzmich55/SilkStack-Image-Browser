@@ -31,8 +31,12 @@ import ImageTable from './components/ImageTable';
 import SimilarityStackExpandedView from './components/SimilarityStackExpandedViewWrapper';
 
 import { normalizePath } from './utils/pathUtils';
+import { useAiFeaturesEnabled } from './services/aiFeatureAccess';
 
 export default function App() {
+  // Runtime gate: AI features (Stacks view, smart stacking, auto-tag)
+  // are visible only when the module exists AND premium is active.
+  const aiFeaturesEnabled = useAiFeaturesEnabled();
   // --- Hooks ---
   const { 
     handleSelectFolder, 
@@ -331,6 +335,17 @@ export default function App() {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, []);
+
+  // If premium is deactivated while inside a stack view (e.g. license
+  // revoked or expired mid-session), exit the stack context and leave the
+  // Stacks view so the user isn't stranded on a locked feature.
+  useEffect(() => {
+    if (aiFeaturesEnabled) return;
+    const { libraryStackContext, activeView, setLibraryStackContext, setActiveView } =
+      useImageStore.getState();
+    if (libraryStackContext) setLibraryStackContext(null);
+    if (activeView === 'smart') setActiveView('library');
+  }, [aiFeaturesEnabled]);
 
   // Escape from stack view back to library
   useEffect(() => {
@@ -1027,7 +1042,7 @@ export default function App() {
               ) : (
                 <div className="h-full">
                   {activeView === 'smart' ? (
-                    import.meta.env.VITE_AI_FEATURES_AVAILABLE ? <Stacks /> : null
+                    aiFeaturesEnabled ? <Stacks /> : null
                   ) : activeView === 'model' ? (
                     <ModelView 
                       onModelSelect={(modelName) => {
@@ -1037,7 +1052,7 @@ export default function App() {
                     />
                   ) : (
                     <div className="h-full">
-                      {import.meta.env.VITE_AI_FEATURES_AVAILABLE && libraryStackContext ? (
+                      {aiFeaturesEnabled && libraryStackContext ? (
                         <SimilarityStackExpandedView
                           images={safeFilteredImages}
                           subGroups={libraryStackContext.subGroups || []}

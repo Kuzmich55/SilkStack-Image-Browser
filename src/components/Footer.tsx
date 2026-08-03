@@ -3,6 +3,7 @@ import ImageSizeSlider from './ImageSizeSlider';
 import { Grid3X3, List, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Eye, EyeOff, Layers, Layers2, Sparkles, PanelRight, X } from 'lucide-react';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useImageStore } from '../store/useImageStore';
+import { useAiFeaturesEnabled } from '../services/aiFeatureAccess';
 
 interface FooterProps {
   viewMode: 'grid' | 'list';
@@ -62,6 +63,8 @@ const Footer: React.FC<FooterProps> = ({
   onTogglePreview,
   children,
 }) => {
+  // Runtime gate: stacking & auto-tag UI requires premium license
+  const aiFeaturesEnabled = useAiFeaturesEnabled();
   const enableSafeMode = useSettingsStore((state) => state.enableSafeMode);
   const setEnableSafeMode = useSettingsStore((state) => state.setEnableSafeMode);
   const isStackingEnabled = useSettingsStore((state) => state.isStackingEnabled);
@@ -218,7 +221,7 @@ const Footer: React.FC<FooterProps> = ({
       <div className="flex items-center gap-2 ml-auto">
         <div className="w-px h-4 bg-gray-700/50 mx-2" />
         {/* Stacking Toggle */}
-        {import.meta.env.VITE_AI_FEATURES_AVAILABLE && showStackingToggle && (
+        {aiFeaturesEnabled && showStackingToggle && (
           <button
             onClick={() => setStackingEnabled(!isStackingEnabled)}
             className={`p-1.5 rounded-lg transition-all duration-200 ${
@@ -246,7 +249,7 @@ const Footer: React.FC<FooterProps> = ({
               <Layers size={14} className={isClustering ? 'animate-pulse' : ''}/>
               <span className="hidden xl:inline">Cluster</span>
             </button>
-            {import.meta.env.VITE_AI_FEATURES_AVAILABLE && (
+            {aiFeaturesEnabled && (
               <button
                 onClick={onAutoTag}
                 disabled={!hasDirectories || isAutoTagging}
@@ -264,7 +267,7 @@ const Footer: React.FC<FooterProps> = ({
         )}
 
         {/* Standalone Auto-Tag button (for Library tab, independent of Smart Actions) */}
-        {import.meta.env.VITE_AI_FEATURES_AVAILABLE && showAutoTag && !showSmartActions && (
+        {aiFeaturesEnabled && showAutoTag && !showSmartActions && (
           <div className="flex items-center gap-2 mr-2">
             <button
               onClick={onAutoTag}

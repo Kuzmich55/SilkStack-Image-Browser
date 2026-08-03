@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { IndexedImage, ImageStack, StackSubGroup, StackGroupByDimension, LoRAInfo } from '../types';
 import { useImageStore } from '../store/useImageStore';
 import { useSettingsStore } from '../store/useSettingsStore';
+import { useAiFeaturesEnabled } from '../services/aiFeatureAccess';
 
 // ── Simple hash for sub-group display keys ──────────────────────────────
 // Used only as React key identifiers for StackSubGroup objects in the UI.
@@ -403,8 +404,13 @@ export const useImageStacking = (
   const randomSeed = useImageStore((state) => state.randomSeed);
   const displayStarredFirst = useSettingsStore((state) => state.displayStarredFirst);
 
+  // Premium gate: stacking (grid grouping into ImageStack items) is a
+  // premium feature. Without an active license no stacks are constructed,
+  // so no stack UI can appear in the library grid.
+  const aiFeaturesEnabled = useAiFeaturesEnabled();
+
   const stackedItems = useMemo(() => {
-    if (!isEnabled || images.length === 0) {
+    if (!isEnabled || !aiFeaturesEnabled || images.length === 0) {
       return images;
     }
 
@@ -419,7 +425,7 @@ export const useImageStacking = (
       : images;
 
     return sortItems(items, sortOrder, displayStarredFirst, randomSeed);
-  }, [images, isEnabled, sortOrder, displayStarredFirst, randomSeed]);
+  }, [images, isEnabled, aiFeaturesEnabled, sortOrder, displayStarredFirst, randomSeed]);
 
   return {
     stackedItems,

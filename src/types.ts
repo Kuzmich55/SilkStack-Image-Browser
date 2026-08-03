@@ -265,6 +265,10 @@ export interface ElectronAPI {
     visible: boolean,
   ) => Promise<{ success: boolean; error?: string }>;
   openExternal: (url: string) => Promise<{ success: boolean; error?: string }>;
+  verifyGumroadLicense: (
+    productPermalink: string,
+    licenseKey: string,
+  ) => Promise<{ success: boolean; message?: string; purchase?: Record<string, unknown> }>;
   isDev: () => Promise<boolean>;
 
   // Dev Tools

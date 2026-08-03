@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { useImageStore } from '../store/useImageStore';
 import { type IndexedImage } from '../types';
+import { useAiFeaturesEnabled } from '../services/aiFeatureAccess';
 
 import ActiveFilters from './ActiveFilters';
 
@@ -46,6 +47,7 @@ const GridToolbar: React.FC<GridToolbarProps> = ({
   onUnmergeSelected,
 }) => {
   const toggleFavorite = useImageStore((state) => state.toggleFavorite);
+  const aiFeaturesEnabled = useAiFeaturesEnabled();
 
 
 
@@ -61,7 +63,7 @@ const GridToolbar: React.FC<GridToolbarProps> = ({
   // It appears when 2+ items are selected unless they all already belong
   // to the exact same similarityGroupId / stackGroupId (i.e. already merged).
   const showMergeButton = useMemo(() => {
-    if (!import.meta.env.VITE_AI_FEATURES_AVAILABLE) return false;
+    if (!aiFeaturesEnabled) return false;
     if (selectedCount < 2 || !onMergeSelected) return false;
 
     // Collect group IDs present among selected images.  An undefined /
@@ -78,15 +80,15 @@ const GridToolbar: React.FC<GridToolbarProps> = ({
     if (groupIds.size === 1 && !groupIds.has(undefined)) return false;
 
     return true;
-  }, [selectedCount, onMergeSelected, selectedImagesList]);
+  }, [aiFeaturesEnabled, selectedCount, onMergeSelected, selectedImagesList]);
 
   // Determine whether the unmerge button should be shown.
   // It appears when viewing a stack drill-down and at least one image is selected.
   const showUnmergeButton = useMemo(() => {
-    if (!import.meta.env.VITE_AI_FEATURES_AVAILABLE) return false;
+    if (!aiFeaturesEnabled) return false;
     if (!isInStackView || !onUnmergeSelected) return false;
     return selectedCount >= 1;
-  }, [isInStackView, onUnmergeSelected, selectedCount]);
+  }, [aiFeaturesEnabled, isInStackView, onUnmergeSelected, selectedCount]);
 
 
   const handleToggleFavorites = () => {

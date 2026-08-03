@@ -2,6 +2,7 @@ import React from 'react';
 import CustomMenuBar from './CustomMenuBar';
 import SearchBar from './SearchBar';
 import { Settings } from 'lucide-react';
+import { useAiFeaturesEnabled } from '../services/aiFeatureAccess';
 
 interface TopMenuBarProps {
     onOpenSettings: (tab?: 'general' | 'hotkeys' | 'about') => void;
@@ -30,6 +31,8 @@ const TopMenuBar: React.FC<TopMenuBarProps> = ({
     isSidebarCollapsed = false,
     hasDirectories = false
 }) => {
+    // Runtime gate: the Stacks view tab requires premium license
+    const aiFeaturesEnabled = useAiFeaturesEnabled();
     const [isDev, setIsDev] = React.useState<boolean>(false);
 
     React.useEffect(() => {
@@ -90,7 +93,7 @@ const TopMenuBar: React.FC<TopMenuBarProps> = ({
                         >
                             Library
                         </button>
-                        {import.meta.env.VITE_AI_FEATURES_AVAILABLE && (
+                        {aiFeaturesEnabled && (
                         <button
                             onClick={() => onLibraryViewChange('smart')}
                             className={`px-3.5 py-1 text-[13.5px] font-semibold rounded-full transition-all duration-200 ${

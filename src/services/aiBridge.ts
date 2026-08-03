@@ -1,10 +1,20 @@
 /**
- * AI Bridge — optional dependency abstraction layer.
+ * AI Bridge — optional dependency abstraction layer with premium gating.
  *
- * All AI features (LLM auto-tagging, prompt embeddings) flow through this module.
- * When the `@ai-images-browser/ai-intelligence` package is available, real
- * WebLLM-powered implementations are used. When absent, graceful fallbacks
- * ensure the app compiles and runs without AI features.
+ * All AI features (LLM auto-tagging, prompt embeddings, smart stacking) flow
+ * through this module. When the `@ai-images-browser/ai-intelligence` package
+ * is available AND the user has a valid premium license, real WebLLM-powered
+ * implementations are used. When absent, graceful fallbacks ensure the app
+ * compiles and runs without AI features.
+ *
+ * Premium features (require license — everything inside ai-intelligence):
+ *   - createLLMTagGenerator()    — LLM-based auto-tagging
+ *   - createEmbeddingProvider()  — Semantic prompt embeddings
+ *   - createStackingEngine()     — AI-powered image grouping
+ *   - createTagGenerator()       — Rule-based extraction from ai-intelligence
+ *
+ * Free features (always available, open-source code in this repo):
+ *   - createTagGenerator()       — falls back to BuiltInTagGenerator without a license
  *
  * Usage:
  *   const llm = await createLLMTagGenerator(modelId, onProgress);
@@ -76,6 +86,18 @@ Output: ["1girl", "solo", "cyberpunk city", "neon lights"]`;
 // ── Dynamic module loader ───────────────────────────────────────────
 
 let aiModule: Record<string, unknown> | null = null;
+
+// ── License gate ─────────────────────────────────────────────────────
+
+/**
+ * Lazy-imported check to avoid a circular dependency between aiBridge and
+ * useSettingsStore. The check is deferred until first use so the store
+ * singleton is guaranteed to exist.
+ */
+async function checkPremiumLicense(): Promise<boolean> {
+  const { isPremiumUnlocked } = await import('../store/useSettingsStore');
+  return isPremiumUnlocked();
+}
 let loadAttempted = false;
 let loadError: string | null = null;
 
@@ -113,6 +135,9 @@ export async function createLLMTagGenerator(
   modelId: string = TAG_GENERATION_MODEL_ID,
   onProgress?: (report: LoadProgressReport) => void,
 ): Promise<ILLMTagGenerator | null> {
+  // Premium gate: LLM-based tag generation requires a valid license
+  if (!(await checkPremiumLicense())) return null;
+
   const mod = await loadAiModule();
   if (!mod) return null;
 
@@ -130,18 +155,26 @@ export async function createLLMTagGenerator(
 /**
  * Create a rule-based tag generator.
  * Always succeeds: uses the real TagGenerator from ai-intelligence if
- * available, otherwise falls back to the built-in implementation.
+ * available AND the user has a valid premium license; otherwise falls
+ * back to the built-in (open-source) implementation.
+ *
+ * The closed-source TagGenerator is a premium feature — it must not be
+ * reachable without a license, even though the built-in fallback is free.
  */
 export async function createTagGenerator(): Promise<ITagGenerator> {
-  const mod = await loadAiModule();
+  // Premium gate: the closed-source TagGenerator requires a license.
+  // Without one, skip the module entirely and use the built-in extractor.
+  if (await checkPremiumLicense()) {
+    const mod = await loadAiModule();
 
-  if (mod) {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const TagGenerator = (mod as any).TagGenerator;
-      if (TagGenerator) return new TagGenerator() as ITagGenerator;
-    } catch {
-      // Fall through to built-in fallback
+    if (mod) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const TagGenerator = (mod as any).TagGenerator;
+        if (TagGenerator) return new TagGenerator() as ITagGenerator;
+      } catch {
+        // Fall through to built-in fallback
+      }
     }
   }
 
@@ -157,6 +190,9 @@ export async function createEmbeddingProvider(
   dimension: number = 768,
   onProgress?: (report: LoadProgressReport) => void,
 ): Promise<IEmbeddingProvider | null> {
+  // Premium gate: embedding generation requires a valid license
+  if (!(await checkPremiumLicense())) return null;
+
   const mod = await loadAiModule();
   if (!mod) return null;
 
@@ -197,6 +233,9 @@ export interface IStackingEngine {
  * Returns `null` if the ai-intelligence module is unavailable.
  */
 export async function createStackingEngine(): Promise<IStackingEngine | null> {
+  // Premium gate: AI stacking engine requires a valid license
+  if (!(await checkPremiumLicense())) return null;
+
   const mod = await loadAiModule();
   if (!mod) return null;
 

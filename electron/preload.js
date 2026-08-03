@@ -180,6 +180,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // External Apps
 
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  verifyGumroadLicense: (productPermalink, licenseKey) =>
+    ipcRenderer.invoke('verify-gumroad-license', productPermalink, licenseKey),
 
   // TEST ONLY: Simulate update dialog
   testUpdateDialog: () => ipcRenderer.invoke('test-update-dialog'),

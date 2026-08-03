@@ -2,6 +2,7 @@ import React from 'react';
 import { ImageStack, IndexedImage } from '../types';
 import { useThumbnail } from '../hooks/useThumbnail';
 import { safeLazy } from '../utils/safeLazy';
+import { useAiFeaturesEnabled } from '../services/aiFeatureAccess';
 
 interface StackCardWrapperProps {
   stack: ImageStack;
@@ -44,8 +45,9 @@ const StackCardWrapper: React.FC<StackCardWrapperProps> = ({ stack, onOpen }) =>
   // StackCard's hover scrubber switches between images[previewIndex]
   // thumbnails — all of them must be available for smooth scrubbing.
   const images = stack.images as IndexedImage[];
+  const aiFeaturesEnabled = useAiFeaturesEnabled();
 
-  if (!import.meta.env.VITE_AI_FEATURES_AVAILABLE || !StackCardInner) {
+  if (!aiFeaturesEnabled || !StackCardInner) {
     return null;
   }
 

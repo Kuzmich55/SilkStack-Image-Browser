@@ -12,6 +12,7 @@ import {
 import { normalizePath } from '../utils/pathUtils';
 import { getAspectRatio as getImageAspectRatio } from '../utils/imageUtils';
 import { useSettingsStore } from './useSettingsStore';
+import { isAiFeaturesEnabled } from '../services/aiFeatureAccess';
 
 const RECENT_TAGS_STORAGE_KEY = 'image-metahub-recent-tags';
 const MAX_RECENT_TAGS = 12;
@@ -2859,8 +2860,8 @@ export const useImageStore = create<ImageState>((set, get) => {
         },
 
         setStackingEnabled: (enabled: boolean) => {
-            // Without ai-intelligence, stacking cannot be enabled
-            if (enabled && !import.meta.env.VITE_AI_FEATURES_AVAILABLE) return;
+            // Without ai-intelligence or a premium license, stacking cannot be enabled
+            if (enabled && !isAiFeaturesEnabled()) return;
             set({ isStackingEnabled: enabled });
             // Persist synchronously via localStorage as a backup so the setting
             // survives even when the Electron IPC saveSettings call is delayed
@@ -3023,7 +3024,7 @@ export const useImageStore = create<ImageState>((set, get) => {
          * together.  Also clears the selection on success.
          */
         mergeSelectedToStack: async () => {
-            if (!import.meta.env.VITE_AI_FEATURES_AVAILABLE) return;
+            if (!isAiFeaturesEnabled()) return;
             const state = get();
             const { selectedImages, images, annotations } = state;
 
@@ -3148,7 +3149,7 @@ export const useImageStore = create<ImageState>((set, get) => {
          * drill-down (libraryStackContext is set).
          */
         unmergeSelectedFromStack: async () => {
-            if (!import.meta.env.VITE_AI_FEATURES_AVAILABLE) return;
+            if (!isAiFeaturesEnabled()) return;
 
             const state = get();
             const { selectedImages, annotations, libraryStackContext } = state;
@@ -3242,7 +3243,7 @@ export const useImageStore = create<ImageState>((set, get) => {
          * undo stack is empty.
          */
         tryUndo: async (): Promise<boolean> => {
-            if (!import.meta.env.VITE_AI_FEATURES_AVAILABLE) return false;
+            if (!isAiFeaturesEnabled()) return false;
             const entry = __undoStack.pop();
             if (!entry) return false;
 

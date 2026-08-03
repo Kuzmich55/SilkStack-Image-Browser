@@ -1,23 +1,25 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useSettingsStore } from '../store/useSettingsStore';
-import { X, Save, RefreshCw, CheckCircle, AlertCircle, Trash2, FolderOpen, Wrench, Palette, Keyboard, Eye, Check, Info, Github, Smile, Tag, GripVertical } from 'lucide-react';
+import { X, Save, RefreshCw, CheckCircle, AlertCircle, Trash2, FolderOpen, Wrench, Palette, Keyboard, Eye, Check, Info, Github, Smile, Tag, GripVertical, ShieldCheck, Key, ExternalLink } from 'lucide-react';
 import { resetAllCaches } from '../utils/cacheReset';
 import { HotkeySettings } from './HotkeySettings';
 import { useImageStore } from '../store/useImageStore';
 import { Directory } from '../types';
 import { EMOJI_CATEGORIES } from '../utils/emojiData';
 import { normalizePath } from '../utils/pathUtils';
+import { verifyLicenseKey, statusFromGumroadResponse, GUMROAD_PRODUCT_PERMALINK } from '../services/licenseService';
+import type { LicenseStatus } from '../services/licenseService';
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  initialTab?: 'general' | 'folders' | 'hotkeys' | 'about';
+  initialTab?: 'general' | 'folders' | 'hotkeys' | 'license' | 'about';
   directories?: Directory[];
   onAddFolder?: () => void;
   onRemoveFolder?: (directoryId: string) => void;
 }
 
-type Tab = 'general' | 'folders' | 'hotkeys' | 'about';
+type Tab = 'general' | 'folders' | 'hotkeys' | 'license' | 'about';
 
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ 
@@ -43,6 +45,17 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   const setConfirmOnDelete = useSettingsStore((state) => state.setConfirmOnDelete);
   const disableAiFallback = useSettingsStore((state) => state.disableAiFallback);
   const setDisableAiFallback = useSettingsStore((state) => state.setDisableAiFallback);
+
+  // License state
+  const licenseKey = useSettingsStore((state) => state.licenseKey);
+  const licenseStatus = useSettingsStore((state) => state.licenseStatus);
+  const licenseEmail = useSettingsStore((state) => state.licenseEmail);
+  const setLicenseState = useSettingsStore((state) => state.setLicenseState);
+  const clearLicense = useSettingsStore((state) => state.clearLicense);
+
+  const [licenseKeyInput, setLicenseKeyInput] = useState('');
+  const [licenseVerifying, setLicenseVerifying] = useState(false);
+  const [licenseError, setLicenseError] = useState<string | null>(null);
 
   const [sensitiveTagsInput, setSensitiveTagsInput] = useState('');
   const [cacheFolderPath, setCacheFolderPath] = useState('');
@@ -150,6 +163,65 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
+  // ── License handlers ──────────────────────────────────────────────────
+
+  const handleVerifyLicense = async () => {
+    const trimmed = licenseKeyInput.trim();
+    if (!trimmed) {
+      setLicenseError('Please enter a license key.');
+      return;
+    }
+
+    setLicenseVerifying(true);
+    setLicenseError(null);
+    setLicenseState({ licenseStatus: 'verifying' });
+
+    try {
+      const payload = await verifyLicenseKey(trimmed);
+      const { status, email, purchaseDate } = statusFromGumroadResponse(payload);
+
+      setLicenseState({
+        licenseKey: trimmed,
+        licenseStatus: status,
+        licenseEmail: email,
+        licensePurchaseDate: purchaseDate,
+        licenseLastValidated: Date.now(),
+      });
+
+      if (status === 'valid') {
+        setLicenseKeyInput('');
+      } else if (status === 'invalid') {
+        setLicenseError(payload.message || 'This license key is not valid.');
+      } else if (status === 'expired') {
+        setLicenseError('This license has expired.');
+      } else if (status === 'revoked') {
+        setLicenseError('This license has been revoked or refunded.');
+      }
+    } catch (err) {
+      setLicenseError(err instanceof Error ? err.message : 'Verification failed. Check your internet connection.');
+      setLicenseState({ licenseStatus: 'unchecked' });
+    } finally {
+      setLicenseVerifying(false);
+    }
+  };
+
+  const handleClearLicense = () => {
+    setLicenseKeyInput('');
+    setLicenseError(null);
+    clearLicense();
+  };
+
+  const statusConfig: Record<LicenseStatus, { icon: React.ReactNode; label: string; color: string }> = {
+    unchecked:  { icon: <Key size={16} />,           label: 'No license',          color: 'text-gray-500' },
+    verifying:  { icon: <RefreshCw size={16} className="animate-spin" />, label: 'Verifying...', color: 'text-blue-400' },
+    valid:      { icon: <CheckCircle size={16} />,    label: 'Premium — Active',    color: 'text-green-400' },
+    'offline-valid': { icon: <CheckCircle size={16} />, label: 'Premium — Active (offline)', color: 'text-green-400' },
+    invalid:    { icon: <AlertCircle size={16} />,    label: 'Invalid key',         color: 'text-red-400' },
+    expired:    { icon: <AlertCircle size={16} />,    label: 'Expired',             color: 'text-yellow-400' },
+    revoked:    { icon: <AlertCircle size={16} />,    label: 'Revoked / Refunded',  color: 'text-red-400' },
+  };
+
+  const currentStatus = statusConfig[licenseStatus];
 
   if (!isOpen) {
     return null;
@@ -193,6 +265,14 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
             >
               <Keyboard size={18} />
               <span>Keyboard Shortcuts</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('license')}
+              className={`flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200 ${activeTab === 'license' ? 'bg-blue-600/20 text-blue-400' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
+            >
+              <ShieldCheck size={18} />
+              <span>License</span>
             </button>
 
             <button
@@ -623,6 +703,123 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                 <div className="animate-in fade-in duration-300 h-full pb-8">
                   <h3 className="text-lg font-semibold mb-6 text-gray-200 border-b border-gray-700/50 pb-2">Keyboard Shortcuts</h3>
                   <HotkeySettings />
+                </div>
+              )}
+
+
+
+              {activeTab === 'license' && (
+                <div className="space-y-8 animate-in fade-in duration-300 pb-8">
+                  {/* Current Status */}
+                  <section>
+                    <h3 className="text-lg font-semibold mb-4 text-gray-200 border-b border-gray-700/50 pb-2">License Status</h3>
+                    <div className="bg-gray-900/80 p-5 rounded-xl border border-gray-700/50">
+                      <div className="flex items-center gap-3">
+                        <span className={currentStatus.color}>{currentStatus.icon}</span>
+                        <span className={`text-sm font-semibold ${currentStatus.color}`}>{currentStatus.label}</span>
+                        {licenseEmail && (
+                          <span className="text-sm text-gray-500">({licenseEmail})</span>
+                        )}
+                      </div>
+                    </div>
+                  </section>
+
+                  {/* Enter License Key */}
+                  <section>
+                    <h3 className="text-lg font-semibold mb-4 text-gray-200 border-b border-gray-700/50 pb-2">
+                      {licenseStatus === 'valid' || licenseStatus === 'offline-valid'
+                        ? 'Change License'
+                        : 'Activate Premium'}
+                    </h3>
+
+                    <div className="bg-gray-900/80 p-5 rounded-xl border border-gray-700/50 space-y-4">
+                      <p className="text-sm text-gray-400 leading-relaxed">
+                        {licenseStatus === 'valid' || licenseStatus === 'offline-valid'
+                          ? 'Enter a new license key to switch your license.'
+                          : 'Enter your license key to unlock premium features including AI auto-tagging, smart image stacks, and more.'}
+                      </p>
+
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-gray-200 block">License Key</label>
+                        <input
+                          type="text"
+                          value={licenseKeyInput}
+                          onChange={(e) => { setLicenseKeyInput(e.target.value); setLicenseError(null); }}
+                          onKeyDown={(e) => { if (e.key === 'Enter') handleVerifyLicense(); }}
+                          placeholder={licenseKey ? '••••••••••••' : 'Paste your license key here'}
+                          disabled={licenseVerifying}
+                          autoComplete="off"
+                          spellCheck={false}
+                          className="w-full bg-gray-950 border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors disabled:opacity-50 font-mono"
+                        />
+                      </div>
+
+                      {licenseError && (
+                        <div className="flex items-start gap-2 text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+                          <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                          <span>{licenseError}</span>
+                        </div>
+                      )}
+
+                      <div className="flex gap-3 pt-1">
+                        <button
+                          onClick={handleVerifyLicense}
+                          disabled={licenseVerifying || !licenseKeyInput.trim()}
+                          className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors"
+                        >
+                          {licenseVerifying ? (
+                            <RefreshCw size={16} className="animate-spin" />
+                          ) : (
+                            <Check size={16} />
+                          )}
+                          {licenseVerifying ? 'Verifying...' : 'Verify & Activate'}
+                        </button>
+
+                        {(licenseStatus === 'valid' || licenseStatus === 'offline-valid') && (
+                          <button
+                            onClick={handleClearLicense}
+                            className="inline-flex items-center gap-2 px-5 py-2.5 bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 text-red-400 rounded-lg text-sm font-medium transition-colors"
+                          >
+                            <X size={16} />
+                            Remove License
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </section>
+
+                  {/* Purchase */}
+                  {(licenseStatus === 'unchecked' || licenseStatus === 'invalid' || licenseStatus === 'expired' || licenseStatus === 'revoked') && (
+                    <section>
+                      <h3 className="text-lg font-semibold mb-4 text-gray-200 border-b border-gray-700/50 pb-2">Get a License</h3>
+                      <div className="bg-gradient-to-br from-blue-900/30 to-purple-900/30 p-6 rounded-xl border border-blue-500/20">
+                        <p className="text-sm text-gray-300 leading-relaxed mb-4">
+                          Unlock AI-powered features in SilkStack:
+                        </p>
+                        <ul className="text-sm text-gray-400 space-y-2 mb-5">
+                          <li className="flex items-start gap-2">
+                            <CheckCircle size={16} className="text-green-400 shrink-0 mt-0.5" />
+                            <span><strong>AI Auto-Tagging</strong> — Automatically tag images using local LLM (WebLLM)</span>
+                          </li>
+                          <li className="flex items-start gap-2">
+                            <CheckCircle size={16} className="text-green-400 shrink-0 mt-0.5" />
+                            <span><strong>Smart Image Stacks</strong> — Group similar images by prompt embedding similarity</span>
+                          </li>
+                          <li className="flex items-start gap-2">
+                            <CheckCircle size={16} className="text-green-400 shrink-0 mt-0.5" />
+                            <span><strong>Semantic Search</strong> — Find images by meaning, not just keywords</span>
+                          </li>
+                        </ul>
+                        <button
+                          onClick={() => window.electronAPI?.openExternal('https://silkstackbrowser.gumroad.com/l/images')}
+                          className="inline-flex items-center gap-2 px-5 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-lg text-sm font-medium transition-colors"
+                        >
+                          <ExternalLink size={16} />
+                          Purchase on Gumroad
+                        </button>
+                      </div>
+                    </section>
+                  )}
                 </div>
               )}
 

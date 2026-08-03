@@ -73,6 +73,10 @@ describe('Stacks Scroll Position and DOM Preservation', () => {
       scanSubfolders: false,
     });
 
+    // Stack UI is premium-gated: a valid license is required for
+    // StackCardWrapper to render the card contents.
+    useSettingsStore.setState({ licenseStatus: 'valid' });
+
     const { container } = render(<Stacks />);
 
     // Grid container should be in DOM and visible

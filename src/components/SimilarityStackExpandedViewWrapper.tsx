@@ -6,6 +6,7 @@ import { useImageStore } from '../store/useImageStore';
 import { useThumbnail } from '../hooks/useThumbnail';
 import { buildSubGroups } from '../hooks/useImageStacking';
 import { safeLazy } from '../utils/safeLazy';
+import { useAiFeaturesEnabled } from '../services/aiFeatureAccess';
 
 interface SimilarityStackExpandedViewWrapperProps {
   images: IndexedImage[];
@@ -70,6 +71,7 @@ const SimilarityStackExpandedViewWrapper: React.FC<SimilarityStackExpandedViewWr
   onBack,
   imageSize: imageSizeProp,
 }) => {
+  const aiFeaturesEnabled = useAiFeaturesEnabled();
   const libraryImageSize = useSettingsStore(s => s.viewZoomLevels.library);
   const thumbnailsDisabled = useSettingsStore(s => s.disableThumbnails);
   const displayStarredFirst = useSettingsStore(s => s.displayStarredFirst);
@@ -223,7 +225,7 @@ const SimilarityStackExpandedViewWrapper: React.FC<SimilarityStackExpandedViewWr
     useImageStore.getState().clearDraggedItems();
   }, []);
 
-  if (!import.meta.env.VITE_AI_FEATURES_AVAILABLE || !ExpandedViewInner) {
+  if (!aiFeaturesEnabled || !ExpandedViewInner) {
     return null;
   }
 

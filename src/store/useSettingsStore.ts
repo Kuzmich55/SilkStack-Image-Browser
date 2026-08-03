@@ -33,6 +33,8 @@ const electronStorage: StateStorage = {
 };
 
 import { Keymap, StackGroupByDimension } from '../types';
+import type { LicenseState, LicenseStatus } from '../services/licenseService';
+import { getDefaultLicenseState } from '../services/licenseService';
 
 const detectDefaultIndexingConcurrency = (): number => {
   if (typeof navigator !== 'undefined' && typeof navigator.hardwareConcurrency === 'number') {
@@ -83,6 +85,13 @@ interface SettingsState {
   isStackingEnabled: boolean;
   stackGroupByDimensions: StackGroupByDimension[];
 
+  // License / Premium feature state
+  licenseKey: string;
+  licenseStatus: LicenseStatus;
+  licenseEmail: string;
+  licensePurchaseDate: string | null;
+  licenseLastValidated: number;
+
   // Actions
   setSortOrder: (order: 'asc' | 'desc' | 'date-asc' | 'date-desc' | 'random') => void;
   toggleScanSubfolders: () => void;
@@ -109,6 +118,8 @@ interface SettingsState {
   setSidebarCollapsed: (value: boolean) => void;
   setStackingEnabled: (enabled: boolean) => void;
   setStackGroupByDimensions: (dimensions: StackGroupByDimension[]) => void;
+  setLicenseState: (state: Partial<LicenseState>) => void;
+  clearLicense: () => void;
   resetState: () => void;
 }
 
@@ -155,6 +166,9 @@ export const useSettingsStore = create<SettingsState>()(
       isStackingEnabled: true,
       stackGroupByDimensions: ['prompt'],
 
+      // License state — starts as "unchecked" until user enters a key
+      ...getDefaultLicenseState(),
+
       // Actions
       setSortOrder: (order) => set({ sortOrder: order }),
       toggleScanSubfolders: () => set((state) => ({ scanSubfolders: !state.scanSubfolders })),
@@ -192,6 +206,8 @@ export const useSettingsStore = create<SettingsState>()(
       setSidebarCollapsed: (value) => set({ isSidebarCollapsed: !!value }),
       setStackingEnabled: (enabled) => set({ isStackingEnabled: enabled }),
       setStackGroupByDimensions: (dimensions) => set({ stackGroupByDimensions: dimensions }),
+      setLicenseState: (partial) => set(partial),
+      clearLicense: () => set(getDefaultLicenseState()),
       updateKeybinding: (scope, action, keybinding) =>
         set((state) => ({
           keymap: {
@@ -241,6 +257,7 @@ export const useSettingsStore = create<SettingsState>()(
         disableAiFallback: false,
         isSidebarCollapsed: true,
         isStackingEnabled: false,
+        ...getDefaultLicenseState(),
       }),
     }),
     {
@@ -292,7 +309,33 @@ export const useSettingsStore = create<SettingsState>()(
         if (state && !Array.isArray(state.stackGroupByDimensions)) {
           state.stackGroupByDimensions = ['prompt'];
         }
+
+        // License state migration — ensure all fields exist
+        if (state) {
+          if (typeof state.licenseKey !== 'string') state.licenseKey = '';
+          if (typeof state.licenseStatus !== 'string') state.licenseStatus = 'unchecked';
+          if (typeof state.licenseEmail !== 'string') state.licenseEmail = '';
+          if (state.licensePurchaseDate === undefined) state.licensePurchaseDate = null;
+          if (typeof state.licenseLastValidated !== 'number') state.licenseLastValidated = 0;
+        }
       },
     }
   )
 );
+
+/**
+ * Check whether premium features should be unlocked based on the
+ * current license status. Use this as a reactive selector in components
+ * or as an imperative check in services.
+ *
+ * Usage in components:
+ *   const isPremium = useSettingsStore.use.isPremiumUnlocked?.();
+ *
+ * Usage in services:
+ *   import { isPremiumUnlocked } from '../store/useSettingsStore';
+ *   if (isPremiumUnlocked()) { ... }
+ */
+export function isPremiumUnlocked(): boolean {
+  const state = useSettingsStore.getState();
+  return state.licenseStatus === 'valid' || state.licenseStatus === 'offline-valid';
+}

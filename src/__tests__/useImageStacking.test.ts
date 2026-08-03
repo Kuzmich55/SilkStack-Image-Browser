@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 vi.hoisted(() => {
   global.localStorage = {
@@ -41,6 +41,33 @@ const createImage = (overrides: Partial<IndexedImage>): IndexedImage => ({
 });
 
 describe('useImageStacking Hook', () => {
+  // Stacking is premium-gated: the hook must see an active license to group.
+  beforeEach(() => {
+    useSettingsStore.setState({ licenseStatus: 'valid' });
+  });
+
+  it('does NOT group images without a premium license (feature locked)', () => {
+    useSettingsStore.setState({ licenseStatus: 'unchecked' });
+    useImageStore.setState({ sortOrder: 'date-desc' });
+    useSettingsStore.setState({ displayStarredFirst: false });
+
+    const images: IndexedImage[] = [
+      createImage({ id: '1', prompt: 'A beautiful cat', lastModified: 1000, stackGroupId: 'cat-hash' }),
+      createImage({ id: '2', prompt: 'A beautiful cat', lastModified: 800, stackGroupId: 'cat-hash' }),
+      createImage({ id: '3', prompt: 'A beautiful dog', lastModified: 700, stackGroupId: 'dog-hash' }),
+    ];
+
+    const { result } = renderHook(() => useImageStacking(images, true));
+    const stacked = result.current.stackedItems;
+
+    // Even though stacking is enabled AND annotations exist, no stacks
+    // may be constructed — every image stays a flat singleton.
+    expect(stacked).toHaveLength(3);
+    for (const item of stacked) {
+      expect('coverImage' in item).toBe(false);
+    }
+  });
+
   it('groups images by stackGroupId annotation field into stacks', () => {
     useImageStore.setState({ sortOrder: 'date-desc' });
     useSettingsStore.setState({ displayStarredFirst: false });

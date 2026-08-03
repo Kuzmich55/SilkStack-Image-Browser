@@ -1045,6 +1045,43 @@ function setupFileOperationHandlers() {
     }
   });
 
+  // --- Gumroad License Verification IPC ---
+
+  ipcMain.handle(
+    "verify-gumroad-license",
+    async (_event, productPermalink, licenseKey) => {
+      try {
+        const response = await fetch(
+          "https://api.gumroad.com/v2/licenses/verify",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({
+              product_permalink: productPermalink,
+              license_key: licenseKey,
+            }).toString(),
+          },
+        );
+
+        if (!response.ok) {
+          console.error(
+            `[Gumroad] API returned ${response.status}: ${response.statusText}`,
+          );
+          return { success: false, message: `API error: ${response.status}` };
+        }
+
+        const payload = await response.json();
+        return payload;
+      } catch (err) {
+        console.error("[Gumroad] Verification error:", err);
+        return {
+          success: false,
+          message: err.message || "Network error during verification",
+        };
+      }
+    },
+  );
+
   // --- Settings IPC ---
   ipcMain.handle("get-settings", async () => {
     const settings = await readSettings();
