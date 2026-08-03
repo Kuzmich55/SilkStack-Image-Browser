@@ -8,6 +8,7 @@ import { Directory } from '../types';
 import { EMOJI_CATEGORIES } from '../utils/emojiData';
 import { normalizePath } from '../utils/pathUtils';
 import { safeLazy } from '../utils/safeLazy';
+import { useAiFeaturesEnabled } from '../services/aiFeatureAccess';
 
 // ── License Tab — lazy-loaded from the closed-source module ───────────
 // When ai-intelligence is absent at build time, dead-code elimination
@@ -83,6 +84,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   const setConfirmOnDelete = useSettingsStore((state) => state.setConfirmOnDelete);
   const disableAiFallback = useSettingsStore((state) => state.disableAiFallback);
   const setDisableAiFallback = useSettingsStore((state) => state.setDisableAiFallback);
+
+  // Runtime gate: the AI fallback toggle is a premium-only setting
+  const aiFeaturesEnabled = useAiFeaturesEnabled();
 
   const [sensitiveTagsInput, setSensitiveTagsInput] = useState('');
   const [cacheFolderPath, setCacheFolderPath] = useState('');
@@ -347,6 +351,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                         </label>
                       </div>
 
+                      {aiFeaturesEnabled && (
                       <div className="flex items-start justify-between bg-gray-900/80 p-5 rounded-xl border border-gray-700/50 shadow-sm transition-all hover:border-gray-600">
                         <div className="pr-6">
                           <p className="text-sm font-medium text-gray-200">Disable AI fallback for auto-tagging</p>
@@ -364,6 +369,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                           <div className="w-11 h-6 bg-gray-700 rounded-full peer peer-focus:ring-2 peer-focus:ring-blue-500 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
                         </label>
                       </div>
+                      )}
                     </div>
                   </section>
 
