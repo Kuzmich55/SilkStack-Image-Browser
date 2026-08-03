@@ -56,9 +56,6 @@
   "overrides": {
     "shell-quote": "1.8.4"
   },
-  "optionalDependencies": {
-    "@ai-images-browser/ai-intelligence": "file:./ai-intelligence"
-  },
   "devDependencies": {
     "@eslint/js": "^9.37.0",
     "@tailwindcss/postcss": "^4.1.14",

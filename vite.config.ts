@@ -21,6 +21,16 @@ const aiFeaturesAvailable = existsSync(
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  resolve: aiFeaturesAvailable
+    ? {
+        alias: {
+          '@ai-images-browser/ai-intelligence': resolve(
+            __dirname,
+            'ai-intelligence',
+          ),
+        },
+      }
+    : undefined,
   plugins: [
     react(),
     {
