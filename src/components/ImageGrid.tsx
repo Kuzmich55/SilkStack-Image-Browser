@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import { useThumbnail } from '../hooks/useThumbnail';
 import { useImageStacking } from '../hooks/useImageStacking';
+import { useStackingEnabled } from '../services/aiFeatureAccess';
 
 class GridErrorBoundary extends React.Component<{children: React.ReactNode}, {hasError: boolean, error: Error | null}> {
   constructor(props: {children: React.ReactNode}) {
@@ -560,16 +561,18 @@ const ImageGrid: React.FC<ImageGridProps & { width: number; height: number }> = 
   const scrollStateRef = useRef({ key: scrollKey, top: 0 });
 
   // --- Stacking Logic (Must be top-level) ---
-  // Read isStackingEnabled from the settings store (source of truth, persisted)
-  // rather than the image store to avoid desync on app reload.
-  const isStackingEnabled = useSettingsStore((state) => state.isStackingEnabled);
+  // useStackingEnabled() combines the user's toggle preference with the
+  // premium gate: without a license (or the module), stacking is OFF
+  // regardless of the persisted setting, so images don't silently group
+  // from stale premium data.
+  const stackingEnabled = useStackingEnabled();
   const setStackingEnabled = useImageStore((state) => state.setStackingEnabled);
   const setLibraryStackContext = useImageStore((state) => state.setLibraryStackContext);
   const libraryStackContext = useImageStore((state) => state.libraryStackContext);
   const pendingRestoreStackScrollRef = useRef<boolean>(false);
   const prevLibraryStackContextRef = useRef<LibraryStackContext | null>(null);
 
-  const { stackedItems } = useImageStacking(images, isStackingEnabled);
+  const { stackedItems } = useImageStacking(images, stackingEnabled);
   const gridRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<List>(null);
@@ -623,7 +626,7 @@ const ImageGrid: React.FC<ImageGridProps & { width: number; height: number }> = 
   const imageCardsRef = useRef<Map<string, HTMLDivElement>>(new Map());
 
   // Layout logic
-  const itemsToRender: (IndexedImage | ImageStack)[] = (isStackingEnabled && !disableStacking) ? stackedItems : images;
+  const itemsToRender: (IndexedImage | ImageStack)[] = (stackingEnabled && !disableStacking) ? stackedItems : images;
   const focusedItemId = itemsToRender[focusedImageIndex] ? (isImageStack(itemsToRender[focusedImageIndex]) ? (itemsToRender[focusedImageIndex] as ImageStack).coverImage.id : (itemsToRender[focusedImageIndex] as IndexedImage).id) : null;
   
   const rows = useMemo(() => {

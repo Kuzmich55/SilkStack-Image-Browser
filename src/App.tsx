@@ -92,7 +92,6 @@ export default function App() {
 
   // Modal state selectors
 
-  const isStackingEnabled = useSettingsStore((state) => state.isStackingEnabled);
   const setStackingEnabled = useImageStore((state) => state.setStackingEnabled);
   const undoAvailable = useImageStore((state) => state.undoAvailable);
   const libraryStackContext = useImageStore((state) => state.libraryStackContext);
