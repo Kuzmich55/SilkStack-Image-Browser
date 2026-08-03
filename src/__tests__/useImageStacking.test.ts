@@ -15,6 +15,7 @@ import { renderHook } from '@testing-library/react';
 import { useImageStacking } from '../hooks/useImageStacking';
 import { useImageStore } from '../store/useImageStore';
 import { useSettingsStore } from '../store/useSettingsStore';
+import { computeLicenseStamp } from '../services/aiFeatureAccess';
 import { type IndexedImage } from '../types';
 
 const createImage = (overrides: Partial<IndexedImage>): IndexedImage => ({
@@ -43,7 +44,12 @@ const createImage = (overrides: Partial<IndexedImage>): IndexedImage => ({
 describe('useImageStacking Hook', () => {
   // Stacking is premium-gated: the hook must see an active license to group.
   beforeEach(() => {
-    useSettingsStore.setState({ licenseStatus: 'valid' });
+    useSettingsStore.setState({
+      licenseStatus: 'valid',
+      licenseKey: 'TEST-KEY',
+      licenseLastValidated: Date.now(),
+      licenseStamp: computeLicenseStamp('TEST-KEY', 'valid', Date.now()),
+    });
   });
 
   it('does NOT group images without a premium license (feature locked)', () => {

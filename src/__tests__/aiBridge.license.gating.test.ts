@@ -109,18 +109,24 @@ vi.mock('@ai-images-browser/ai-intelligence', () => {
 // Imported statically so we can control license state; aiBridge's internal
 // checkPremiumLicense() dynamic-imports the same module instance.
 import { useSettingsStore } from '../store/useSettingsStore';
+import { computeLicenseStamp } from '../services/aiFeatureAccess';
 import type { LicenseStatus } from '../services/licenseService';
 
 const NON_PREMIUM_STATUSES: LicenseStatus[] = ['unchecked', 'invalid', 'expired', 'revoked'];
 const PREMIUM_STATUSES: LicenseStatus[] = ['valid', 'offline-valid'];
 
 const setLicenseStatus = (status: LicenseStatus) => {
+  const ts = status === 'valid' || status === 'offline-valid' ? Date.now() : 0;
+  const key = status === 'valid' || status === 'offline-valid' ? 'TEST-KEY-1234' : '';
   useSettingsStore.setState({
-    licenseKey: status === 'valid' || status === 'offline-valid' ? 'TEST-KEY-1234' : '',
+    licenseKey: key,
     licenseStatus: status,
     licenseEmail: '',
     licensePurchaseDate: null,
-    licenseLastValidated: status === 'valid' || status === 'offline-valid' ? Date.now() : 0,
+    licenseLastValidated: ts,
+    licenseStamp: key
+      ? computeLicenseStamp(key, status, ts)
+      : '',
   });
 };
 

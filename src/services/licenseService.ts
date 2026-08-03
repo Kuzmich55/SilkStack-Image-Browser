@@ -28,6 +28,8 @@ export interface LicenseState {
   licenseEmail: string;
   licensePurchaseDate: string | null;
   licenseLastValidated: number; // Date.now() timestamp
+  /** HMAC stamp — proves the state wasn't edited by hand in settings.json. */
+  licenseStamp: string;
 }
 
 // ── Default state ─────────────────────────────────────────────────────
@@ -39,5 +41,6 @@ export function getDefaultLicenseState(): LicenseState {
     licenseEmail: '',
     licensePurchaseDate: null,
     licenseLastValidated: 0,
+    licenseStamp: '',
   };
 }

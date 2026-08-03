@@ -91,6 +91,7 @@ interface SettingsState {
   licenseEmail: string;
   licensePurchaseDate: string | null;
   licenseLastValidated: number;
+  licenseStamp: string;
 
   // Actions
   setSortOrder: (order: 'asc' | 'desc' | 'date-asc' | 'date-desc' | 'random') => void;
@@ -317,6 +318,7 @@ export const useSettingsStore = create<SettingsState>()(
           if (typeof state.licenseEmail !== 'string') state.licenseEmail = '';
           if (state.licensePurchaseDate === undefined) state.licensePurchaseDate = null;
           if (typeof state.licenseLastValidated !== 'number') state.licenseLastValidated = 0;
+          if (typeof state.licenseStamp !== 'string') state.licenseStamp = '';
         }
       },
     }
@@ -324,18 +326,6 @@ export const useSettingsStore = create<SettingsState>()(
 );
 
 /**
- * Check whether premium features should be unlocked based on the
- * current license status. Use this as a reactive selector in components
- * or as an imperative check in services.
- *
- * Usage in components:
- *   const isPremium = useSettingsStore.use.isPremiumUnlocked?.();
- *
- * Usage in services:
- *   import { isPremiumUnlocked } from '../store/useSettingsStore';
- *   if (isPremiumUnlocked()) { ... }
+ * @deprecated Import from '../services/aiFeatureAccess' instead.
+ * The authoritative stamp-validating check lives there.
  */
-export function isPremiumUnlocked(): boolean {
-  const state = useSettingsStore.getState();
-  return state.licenseStatus === 'valid' || state.licenseStatus === 'offline-valid';
-}

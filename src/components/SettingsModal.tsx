@@ -8,7 +8,7 @@ import { Directory } from '../types';
 import { EMOJI_CATEGORIES } from '../utils/emojiData';
 import { normalizePath } from '../utils/pathUtils';
 import { safeLazy } from '../utils/safeLazy';
-import { useAiFeaturesEnabled } from '../services/aiFeatureAccess';
+import { useAiFeaturesEnabled, computeLicenseStamp } from '../services/aiFeatureAccess';
 
 // ── License Tab — lazy-loaded from the closed-source module ───────────
 // When ai-intelligence is absent at build time, dead-code elimination
@@ -25,13 +25,37 @@ const LicenseTabModule = import.meta.env.VITE_AI_FEATURES_AVAILABLE
   : null;
 
 /** Thin wrapper: reads license state from the Zustand store and passes it
- *  as props to the closed-source LicenseTab component. */
+ *  as props to the closed-source LicenseTab component.
+ *
+ *  Intercepts the onLicenseStateChange callback so that whenever the
+ *  license transitions to a valid state, an HMAC stamp is computed and
+ *  stored alongside the state.  isPremiumUnlocked() validates this stamp
+ *  on every check — without it, the license is treated as unchecked. */
 const LicenseSettingsPanel: React.FC = () => {
   const licenseKey = useSettingsStore((s) => s.licenseKey);
   const licenseStatus = useSettingsStore((s) => s.licenseStatus);
   const licenseEmail = useSettingsStore((s) => s.licenseEmail);
   const setLicenseState = useSettingsStore((s) => s.setLicenseState);
   const clearLicense = useSettingsStore((s) => s.clearLicense);
+
+  const handleLicenseStateChange = (partial: Partial<{
+    licenseKey: string;
+    licenseStatus: string;
+    licenseEmail: string;
+    licensePurchaseDate: string | null;
+    licenseLastValidated: number;
+    licenseStamp: string;
+  }>) => {
+    // When transitioning to a premium status, compute and attach a stamp
+    // so isPremiumUnlocked() can verify the state hasn't been tampered with.
+    const status = partial.licenseStatus;
+    if (status === 'valid' || status === 'offline-valid') {
+      const key = partial.licenseKey ?? licenseKey;
+      const ts = partial.licenseLastValidated ?? Date.now();
+      (partial as Record<string, unknown>).licenseStamp = computeLicenseStamp(key, status, ts);
+    }
+    setLicenseState(partial as Record<string, unknown> as Parameters<typeof setLicenseState>[0]);
+  };
 
   if (!import.meta.env.VITE_AI_FEATURES_AVAILABLE || !LicenseTabModule) {
     return null;
@@ -43,7 +67,7 @@ const LicenseSettingsPanel: React.FC = () => {
       licenseKey={licenseKey}
       licenseStatus={licenseStatus}
       licenseEmail={licenseEmail}
-      onLicenseStateChange={setLicenseState}
+      onLicenseStateChange={handleLicenseStateChange}
       onClearLicense={clearLicense}
     />
   );

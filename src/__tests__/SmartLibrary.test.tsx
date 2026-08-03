@@ -16,6 +16,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import Stacks from '../components/SmartLibrary';
 import { useImageStore } from '../store/useImageStore';
 import { useSettingsStore } from '../store/useSettingsStore';
+import { computeLicenseStamp } from '../services/aiFeatureAccess';
 
 // Mock the ai-intelligence package — provides stub components that mirror
 // the originals' DOM output for integration tests of the wrapper layer.
@@ -75,7 +76,12 @@ describe('Stacks Scroll Position and DOM Preservation', () => {
 
     // Stack UI is premium-gated: a valid license is required for
     // StackCardWrapper to render the card contents.
-    useSettingsStore.setState({ licenseStatus: 'valid' });
+    useSettingsStore.setState({
+      licenseStatus: 'valid',
+      licenseKey: 'TEST-KEY',
+      licenseLastValidated: Date.now(),
+      licenseStamp: computeLicenseStamp('TEST-KEY', 'valid', Date.now()),
+    });
 
     const { container } = render(<Stacks />);
 

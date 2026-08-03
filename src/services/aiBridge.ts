@@ -95,7 +95,7 @@ let aiModule: Record<string, unknown> | null = null;
  * singleton is guaranteed to exist.
  */
 async function checkPremiumLicense(): Promise<boolean> {
-  const { isPremiumUnlocked } = await import('../store/useSettingsStore');
+  const { isPremiumUnlocked } = await import('../services/aiFeatureAccess');
   return isPremiumUnlocked();
 }
 let loadAttempted = false;
