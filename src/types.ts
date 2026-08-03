@@ -268,6 +268,7 @@ export interface ElectronAPI {
   verifyGumroadLicense: (
     productPermalink: string,
     licenseKey: string,
+    productId?: string,
   ) => Promise<{ success: boolean; message?: string; purchase?: Record<string, unknown> }>;
   isDev: () => Promise<boolean>;
 

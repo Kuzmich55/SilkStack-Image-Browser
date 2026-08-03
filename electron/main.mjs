@@ -1049,28 +1049,49 @@ function setupFileOperationHandlers() {
 
   ipcMain.handle(
     "verify-gumroad-license",
-    async (_event, productPermalink, licenseKey) => {
+    async (_event, productPermalink, licenseKey, productId) => {
       try {
+        const body = new URLSearchParams({
+          product_permalink: productPermalink,
+          license_key: licenseKey,
+        });
+        // Gumroad requires product_id for verification of this product.
+        if (productId) body.set("product_id", productId);
+
         const response = await fetch(
           "https://api.gumroad.com/v2/licenses/verify",
           {
             method: "POST",
             headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: new URLSearchParams({
-              product_permalink: productPermalink,
-              license_key: licenseKey,
-            }).toString(),
+            body: body.toString(),
           },
         );
 
-        if (!response.ok) {
-          console.error(
-            `[Gumroad] API returned ${response.status}: ${response.statusText}`,
-          );
-          return { success: false, message: `API error: ${response.status}` };
+        // Gumroad returns useful JSON bodies even on error statuses
+        // (e.g. 404 "That license does not exist for the provided product.",
+        // 500 when the product permalink is unknown). Parse it so the user
+        // sees the real reason instead of a bare status code.
+        let payload;
+        try {
+          payload = await response.json();
+        } catch {
+          payload = {};
         }
 
-        const payload = await response.json();
+        if (!response.ok) {
+          console.error(
+            `[Gumroad] API returned ${response.status}:`,
+            JSON.stringify(payload),
+          );
+          return {
+            success: false,
+            message:
+              typeof payload.message === "string" && payload.message
+                ? payload.message
+                : `API error: ${response.status}`,
+          };
+        }
+
         return payload;
       } catch (err) {
         console.error("[Gumroad] Verification error:", err);

@@ -16,8 +16,18 @@
 
 // ── Configuration ─────────────────────────────────────────────────────
 
-/** Your Gumroad product permalink — set this to your actual product ID. */
+/**
+ * Your Gumroad product permalink — the slug from the public product URL
+ * (https://silkstackbrowser.gumroad.com/l/images).
+ */
 export const GUMROAD_PRODUCT_PERMALINK = 'images';
+
+/**
+ * Your Gumroad product ID — the long base64 identifier shown in the product
+ * edit URL. Gumroad now REQUIRES this in the license verify request
+ * alongside the permalink.
+ */
+export const GUMROAD_PRODUCT_ID = 'HFATdOGO7jujR5JCIu1fDg==';
 
 /**
  * How long a cached validation result is trusted before requiring
@@ -103,6 +113,7 @@ export interface GumroadLicensePayload {
 export async function verifyLicenseKey(
   licenseKey: string,
   productPermalink: string = GUMROAD_PRODUCT_PERMALINK,
+  productId: string = GUMROAD_PRODUCT_ID,
 ): Promise<GumroadLicensePayload> {
   // Prefer Electron IPC (main process proxy) to avoid CORS issues.
 
@@ -111,6 +122,7 @@ export async function verifyLicenseKey(
       const result = await window.electronAPI.verifyGumroadLicense(
         productPermalink,
         licenseKey,
+        productId,
       );
       // The IPC handler returns the raw Gumroad JSON payload — cast is safe
       // because we control both the preload bridge and the main-process handler.
@@ -126,6 +138,7 @@ export async function verifyLicenseKey(
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       product_permalink: productPermalink,
+      product_id: productId,
       license_key: licenseKey,
     }).toString(),
   });
