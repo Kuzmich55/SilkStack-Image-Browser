@@ -21,16 +21,26 @@ const aiFeaturesAvailable = existsSync(
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  resolve: aiFeaturesAvailable
-    ? {
-        alias: {
-          '@ai-images-browser/ai-intelligence': resolve(
-            __dirname,
-            'ai-intelligence',
-          ),
-        },
-      }
-    : undefined,
+  resolve: {
+    // Force single copies of React and friends even when the
+    // ai-intelligence package ships nested node_modules copies of them
+    // (bare imports inside ai-intelligence/dist/* resolve against the
+    // nested copy first, which would otherwise duplicate React in the
+    // bundle — a second React instance never receives a hooks
+    // dispatcher from react-dom, so its useState crashes with
+    // "Cannot read properties of null (reading 'useState')").
+    dedupe: ['react', 'react-dom', 'lucide-react'],
+    ...(aiFeaturesAvailable
+      ? {
+          alias: {
+            '@ai-images-browser/ai-intelligence': resolve(
+              __dirname,
+              'ai-intelligence',
+            ),
+          },
+        }
+      : {}),
+  },
   plugins: [
     react(),
     {
