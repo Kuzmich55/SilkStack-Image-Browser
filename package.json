@@ -29,7 +29,9 @@
     "sync-changelog": "node scripts/sync-changelog.js",
     "test": "vitest",
     "cli:parse": "tsx scripts/cli.ts parse",
-    "cli:index": "tsx scripts/cli.ts index"
+    "cli:index": "tsx scripts/cli.ts index",
+    "comfy:parse": "tsx scripts/parse-comfy-workflow.ts",
+    "comfy:batch": "tsx scripts/parse-comfy-batch.ts"
   },
   "bin": {
     "SilkStack-cli": "./scripts/cli.ts"
