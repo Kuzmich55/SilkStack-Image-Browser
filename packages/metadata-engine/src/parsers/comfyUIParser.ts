@@ -226,6 +226,10 @@ function extractAdvancedModel(node: ParserNode | null, graph: Graph): string | n
     return node.inputs.ckpt_name;
   }
 
+  if (typeof node.inputs?.unet_name === 'string') {
+    return node.inputs.unet_name;
+  }
+
   // THIRD: Try widgets_values for model name (only for CheckpointLoader-type nodes)
   // Check if this is a checkpoint loader node to avoid picking up LoRA names
   const isCheckpointLoader = node.class_type?.toLowerCase().includes('checkpoint') ||

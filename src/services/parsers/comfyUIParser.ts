@@ -224,6 +224,10 @@ function extractAdvancedModel(node: ParserNode | null, graph: Graph): string | n
     return node.inputs.ckpt_name;
   }
 
+  if (typeof node.inputs?.unet_name === 'string') {
+    return node.inputs.unet_name;
+  }
+
   // THIRD: Try widgets_values for model name (only for CheckpointLoader-type nodes)
   // Check if this is a checkpoint loader node to avoid picking up LoRA names
   const isCheckpointLoader = node.class_type?.toLowerCase().includes('checkpoint') ||
@@ -520,6 +524,18 @@ function createNodeMap(workflow: any, prompt: any): Graph {
                                 const targetGraphNode = graph[fullTargetId];
                                 if (targetGraphNode) {
                                     targetGraphNode.inputs[finalInputName] = wNode.widgets_values[mappedWidgetIdx];
+                                    // Mirror the proxyWidgets behavior: also overwrite the
+                                    // internal node's widget slot so widget-index-based
+                                    // extraction (e.g. UNETLoader's unet_name) sees the
+                                    // instance value instead of the subgraph template default.
+                                    const targetNodeDef = NodeRegistry[targetGraphNode.class_type];
+                                    if (targetNodeDef?.widget_order) {
+                                        const wIdx = targetNodeDef.widget_order.indexOf(finalInputName);
+                                        if (wIdx !== -1) {
+                                            if (!targetGraphNode.widgets_values) targetGraphNode.widgets_values = [];
+                                            targetGraphNode.widgets_values[wIdx] = wNode.widgets_values[mappedWidgetIdx];
+                                        }
+                                    }
                                 }
                             } else {
                                 // Otherwise create an input proxy for top-level link resolution
