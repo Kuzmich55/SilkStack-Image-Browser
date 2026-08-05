@@ -175,7 +175,7 @@ const ActiveFilters: React.FC = () => {
                     className="flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-blue-900/40 text-blue-200 border border-blue-700/50 flex-shrink-0 animate-fade-in"
                     title="Model"
                 >
-                    <span className="truncate max-w-[150px]">{model}</span>
+                    <span className="truncate max-w-[150px]">{model || '(no model)'}</span>
                     <button
                         onClick={() => removeModel(model)}
                         className="ml-1 hover:text-blue-100 rounded-full hover:bg-blue-800/50 p-0.5 transition-colors"

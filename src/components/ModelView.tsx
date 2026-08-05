@@ -40,24 +40,25 @@ export const ModelView: React.FC<ModelViewProps> = ({ onModelSelect }) => {
       directories.filter(d => d.isConnected === false).map(d => d.id)
     );
 
+    const noModelImages: IndexedImage[] = [];
+
     filteredImages.forEach(image => {
       // Skip images from disconnected directories
       if (disconnectedDirIds.has(image.directoryId)) {
         return;
       }
 
-      if (image.models && image.models.length > 0) {
-        image.models.forEach(modelName => {
-          if (!modelName) return;
-          
+      const validModels = (image.models ?? []).filter(Boolean);
+      if (validModels.length > 0) {
+        validModels.forEach(modelName => {
           if (!models.has(modelName)) {
             models.set(modelName, []);
           }
           models.get(modelName)?.push(image);
         });
       } else {
-        // Handle images with no model metadata if needed, or skip
-        // For now, skipping un-modeled images in this view
+        // Images with no model metadata are grouped under the blank entry
+        noModelImages.push(image);
       }
     });
 
@@ -68,13 +69,24 @@ export const ModelView: React.FC<ModelViewProps> = ({ onModelSelect }) => {
     }));
 
     // Sort models
-    return entries.sort((a, b) => {
+    const sorted = entries.sort((a, b) => {
       if (sortBy === 'count') {
         const countDiff = b.count - a.count;
         if (countDiff !== 0) return countDiff;
       }
       return a.name.localeCompare(b.name);
     });
+
+    // Blank-model entry at the end; blank name acts as the 'no model' sentinel
+    if (noModelImages.length > 0) {
+      sorted.push({
+        name: '',
+        images: noModelImages.sort((a, b) => b.lastModified - a.lastModified),
+        count: noModelImages.length
+      });
+    }
+
+    return sorted;
   }, [filteredImages, directories, sortBy]);
 
 

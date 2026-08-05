@@ -54,6 +54,7 @@ const ModelCard: React.FC<ModelCardProps> = ({ modelName, images, imageCount, on
   };
 
   const coverUrl = previewImage?.thumbnailUrl || '';
+  const displayName = modelName || '(no model)';
 
   return (
     <button
@@ -68,7 +69,7 @@ const ModelCard: React.FC<ModelCardProps> = ({ modelName, images, imageCount, on
         {coverUrl ? (
           <img
             src={coverUrl}
-            alt={modelName}
+            alt={displayName}
             className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
             loading="lazy"
           />
@@ -100,8 +101,8 @@ const ModelCard: React.FC<ModelCardProps> = ({ modelName, images, imageCount, on
       </div>
       
       <div className="p-3">
-        <p className="text-sm font-semibold text-gray-100 truncate" title={modelName}>
-          {modelName}
+        <p className="text-sm font-semibold text-gray-100 truncate" title={displayName}>
+          {displayName}
         </p>
         <p className="text-xs text-gray-400 mt-1">
           {imageCount} image{imageCount !== 1 ? 's' : ''}

@@ -951,9 +951,13 @@ export const useImageStore = create<ImageState>((set, get) => {
         }
 
         if (selectedModels.length > 0) {
-            results = results.filter(image =>
-                image.models?.length > 0 && selectedModels.some(sm => image.models.includes(sm))
-            );
+            results = results.filter(image => {
+                // '' is the 'no model' sentinel: match images without any model metadata
+                if (selectedModels.includes('') && (!image.models || image.models.filter(Boolean).length === 0)) {
+                    return true;
+                }
+                return image.models?.length > 0 && selectedModels.some(sm => sm && image.models.includes(sm));
+            });
         }
 
         if (selectedLoras.length > 0) {
