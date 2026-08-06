@@ -29,6 +29,80 @@ function sanitizeJson(jsonString: string): string {
     return jsonString.replace(/:\s*NaN/g, ': null');
 }
 
+/**
+ * Minimal TIFF IFD walker that reads the Make (0x010F) and Model (0x0110)
+ * ASCII tags. ComfyUI SaveWebP (VideoHelperSuite) stores its metadata there:
+ *   Make  = "workflow:{...}"  (UI graph JSON)
+ *   Model = "prompt:{...}"    (execution prompt JSON)
+ * Pure byte math — no dependencies, so it also works when exifr rejects the
+ * input (ArrayBuffer/Buffer realm mismatches make exifr throw "Invalid input
+ * argument", which previously killed the whole WebP extraction).
+ */
+function extractComfyFromTiffMakeModel(tiff: Uint8Array): ImageMetadata | null {
+    if (tiff.length < 8) return null;
+    const isBE = tiff[0] === 0x4d;
+    const readU16 = (o: number): number =>
+        isBE ? (tiff[o] << 8) | tiff[o + 1] : tiff[o] | (tiff[o + 1] << 8);
+    const readU32 = (o: number): number =>
+        (isBE
+            ? (tiff[o] << 24) | (tiff[o + 1] << 16) | (tiff[o + 2] << 8) | tiff[o + 3]
+            : tiff[o] | (tiff[o + 1] << 8) | (tiff[o + 2] << 16) | (tiff[o + 3] << 24)) >>> 0;
+
+    if (readU16(2) !== 0x2a) return null;
+    const ifd0 = readU32(4);
+    if (ifd0 + 2 > tiff.length) return null;
+    const count = readU16(ifd0);
+    if (ifd0 + 2 + count * 12 > tiff.length) return null;
+
+    const tagValues = new Map<number, Uint8Array>();
+    for (let i = 0; i < count; i++) {
+        const entry = ifd0 + 2 + i * 12;
+        const tag = readU16(entry);
+        const type = readU16(entry + 2);
+        const valueCount = readU32(entry + 4);
+        if (type === 2 && valueCount > 0) {
+            // ASCII — inline when ≤ 4 bytes, otherwise at the given offset
+            let bytes: Uint8Array;
+            if (valueCount <= 4) {
+                bytes = tiff.slice(entry + 8, entry + 8 + valueCount);
+            } else {
+                const off = readU32(entry + 8);
+                bytes = off + valueCount <= tiff.length
+                    ? tiff.slice(off, off + valueCount)
+                    : new Uint8Array();
+            }
+            tagValues.set(tag, bytes);
+        }
+    }
+
+    const stripPrefix = (bytes: Uint8Array | undefined): string | null => {
+        if (!bytes || bytes.length === 0) return null;
+        const text = new TextDecoder().decode(bytes).replace(/\0+$/, '').trim();
+        const match = text.match(/^(workflow|prompt)\s*:(.*)$/is);
+        return match ? match[2] : null;
+    };
+
+    let workflow: any;
+    let prompt: any;
+    try {
+        const workflowText = stripPrefix(tagValues.get(0x010f));
+        const promptText = stripPrefix(tagValues.get(0x0110));
+        if (workflowText === null && promptText === null) return null;
+        if (workflowText !== null) workflow = JSON.parse(sanitizeJson(workflowText));
+        if (promptText !== null) prompt = JSON.parse(sanitizeJson(promptText));
+    } catch {
+        // Malformed tag — let downstream parsing try
+        return null;
+    }
+
+    if (workflow === undefined && prompt === undefined) return null;
+    const result: ImageMetadata = {
+        ...(workflow !== undefined ? { workflow } : {}),
+        ...(prompt !== undefined ? { prompt } : {}),
+    };
+    return result;
+}
+
 export function detectImageType(view: DataView): 'png' | 'jpeg' | 'webp' | null {
   if (view.byteLength < 12) {
     return null;
@@ -940,8 +1014,16 @@ export async function parseWebPMetadata(buffer: ArrayBuffer): Promise<ImageMetad
       return null;
     }
 
-    // Parse the EXIF data with exifr
-    const exifData = await parse(exifChunkData, {
+    // ComfyUI SaveWebP keeps workflow/prompt in the Make/Model tags — read
+    // them straight from the TIFF bytes (see extractComfyFromTiffMakeModel).
+    const comfyFromTiff = extractComfyFromTiffMakeModel(new Uint8Array(exifChunkData));
+    if (comfyFromTiff) {
+      return comfyFromTiff;
+    }
+
+    // Parse the EXIF data with exifr (coerce to Uint8Array first — exifr's
+    // instanceof checks fail across realms, e.g. Node Buffer vs jsdom/worker).
+    const exifData = await parse(new Uint8Array(exifChunkData), {
       userComment: true,
       xmp: true,
       mergeOutput: true,
