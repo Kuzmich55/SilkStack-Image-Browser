@@ -31,10 +31,12 @@ import { Command } from 'commander';
 import { readFileSync } from 'fs';
 import { resolve, basename } from 'path';
 
-// Import from the metadata-engine package's internal ComfyUI parser.
-// resolvePromptFromGraph does full extraction including advanced seed/model,
-// modifier (ControlNet/LoRA/VAE) detection, edit history, and version detection.
-import { resolvePromptFromGraph } from '../packages/metadata-engine/src/parsers/comfyUIParser';
+// Import from the app's live ComfyUI parser (src/services is the maintained
+// copy; packages/metadata-engine is a stale snapshot that cannot resolve
+// links from workflow-only JSON). resolvePromptFromGraph does full extraction
+// including advanced seed/model, modifier (ControlNet/LoRA/VAE) detection,
+// edit history, and version detection.
+import { resolvePromptFromGraph } from '../src/services/parsers/comfyUIParser';
 
 // ── Debug suppression ─────────────────────────────────────────────────────────
 // The ComfyUI parser emits debug logs via console.log (e.g. CLIPTextEncode

@@ -21,7 +21,7 @@ import { Command } from 'commander';
 import { readFileSync, createWriteStream, existsSync, statSync } from 'fs';
 import { readdir } from 'fs/promises';
 import { resolve, basename, extname, join } from 'path';
-import { resolvePromptFromGraph } from '../packages/metadata-engine/src/parsers/comfyUIParser';
+import { resolvePromptFromGraph } from '../src/services/parsers/comfyUIParser';
 
 // ── Debug suppression ─────────────────────────────────────────────────────────
 // The ComfyUI parser emits debug logs via console.log. Since this CLI writes

@@ -44,25 +44,29 @@ function traverse(
     return state.targetParam === 'lora' ? accumulator : null;
   }
 
-  // 1. Consciência de Estado: Ignora nós silenciados ("muted")
-  if (currentNode.mode === 2 || currentNode.mode === 4) {
-    return state.targetParam === 'lora' ? accumulator : null;
-  }
-
   const nodeDef = NodeRegistry[currentNode.class_type];
   if (!nodeDef) {
     return state.targetParam === 'lora' ? accumulator : null; // Nó desconhecido
   }
 
+  // 1. Consciência de Estado: nós silenciados (mode 2) e bypassados (mode 4)
+  //    não executam — mas um nó bypassado conecta suas entradas às saídas,
+  //    então os dados continuam fluindo por ele. Não extraímos valores dele
+  //    (suas configurações não foram aplicadas), mas seguimos a travessia
+  //    (ex: LoraLoaderModelOnly bypassado entre UNETLoader e KSampler).
+  const isSilenced = currentNode.mode === 2 || currentNode.mode === 4;
+
   // 2. Extração de Parâmetro (Caso Base ou Rastreamento)
-  const paramRule = state.targetParam !== 'generic' ? nodeDef.param_mapping?.[state.targetParam] : undefined;
-  if (paramRule) {
-    const value = extractValue(currentNode, paramRule, state, graph, accumulator);
-    if (state.targetParam === 'lora') {
-      if (value) accumulator.push(...(Array.isArray(value) ? value : [value]));
-      // Para LoRA, a travessia continua pelo caminho do modelo
-    } else if (value !== null) {
-      return value; // Valor encontrado, termina a busca para este parâmetro
+  if (!isSilenced) {
+    const paramRule = state.targetParam !== 'generic' ? nodeDef.param_mapping?.[state.targetParam] : undefined;
+    if (paramRule) {
+      const value = extractValue(currentNode, paramRule, state, graph, accumulator);
+      if (state.targetParam === 'lora') {
+        if (value) accumulator.push(...(Array.isArray(value) ? value : [value]));
+        // Para LoRA, a travessia continua pelo caminho do modelo
+      } else if (value !== null) {
+        return value; // Valor encontrado, termina a busca para este parâmetro
+      }
     }
   }
 
@@ -70,12 +74,16 @@ function traverse(
   if (nodeDef.roles.includes('ROUTING') && nodeDef.conditional_routing) {
     const controlInputName = nodeDef.conditional_routing.control_input;
     let controlValue: any = null;
-    
-    // Tenta resolver o valor de controle, que pode ser um widget ou um link
-    const controlLink = currentNode.inputs[controlInputName];
-    if (controlLink && Array.isArray(controlLink)) {
-      const controlState = { ...createInitialState('steps'), visitedLinks: state.visitedLinks }; // 'steps' -> INT
-      controlValue = traverseFromLink(controlLink as NodeLink, controlState, graph, []);
+
+    // Tenta resolver o valor de controle, que pode ser um input direto (injetado
+    // por subgraph propagation), um link, ou um fallback para widgets_values.
+    const controlInput = currentNode.inputs[controlInputName];
+    if (controlInput !== undefined && controlInput !== null && !Array.isArray(controlInput)) {
+      // Direct value injected by subgraph widget propagation (e.g. BOOLEAN true/false)
+      controlValue = controlInput;
+    } else if (controlInput && Array.isArray(controlInput)) {
+      const controlState = { ...createInitialState('steps'), visitedLinks: state.visitedLinks };
+      controlValue = traverseFromLink(controlInput as NodeLink, controlState, graph, []);
     } else {
         const widgetValue = currentNode.widgets_values?.find(w => typeof w === 'object' ? w.name === controlInputName : false) ?? currentNode.widgets_values?.[0];
         controlValue = typeof widgetValue === 'object' ? widgetValue.value : widgetValue;
@@ -87,16 +95,24 @@ function traverse(
       if (targetLink && Array.isArray(targetLink)) {
         return traverseFromLink(targetLink as NodeLink, state, graph, accumulator);
       }
+      // Handle direct values (injected by subgraph widget propagation)
+      if (targetLink !== undefined && targetLink !== null && !Array.isArray(targetLink)) {
+        return targetLink;
+      }
     }
     return state.targetParam === 'lora' ? accumulator : null; // Rota dinâmica não encontrada
   }
 
   // 4. Travessia Estática (PASS_THROUGH / TRANSFORM)
   if (nodeDef.roles.includes('PASS_THROUGH') || nodeDef.roles.includes('TRANSFORM')) {
-    // Procura por entradas que correspondam ao tipo de dado esperado para continuar a cadeia
-    for (const inputName in nodeDef.inputs) {
+    // Procura por entradas ordenadas via pass_through_rules ou pelas chaves de inputs
+    const inputNames = nodeDef.pass_through_rules
+        ? nodeDef.pass_through_rules.map(rule => rule.from_input)
+        : Object.keys(nodeDef.inputs);
+
+    for (const inputName of inputNames) {
       const inputDef = nodeDef.inputs[inputName];
-      if (inputDef.type === state.expectedType || inputDef.type === 'ANY') {
+      if (inputDef && (inputDef.type === state.expectedType || inputDef.type === 'ANY')) {
         const inputLink = currentNode.inputs[inputName];
         if (inputLink && Array.isArray(inputLink)) {
            const result = traverseFromLink(inputLink as NodeLink, state, graph, accumulator);
@@ -104,6 +120,13 @@ function traverse(
            if (state.targetParam !== 'lora' && result !== null) {
                return result;
            }
+        }
+        // Handle direct string values injected by subgraph widget propagation.
+        // Must return immediately, BEFORE following further links, so the
+        // preference order in pass_through_rules (e.g. string_b before string_a)
+        // is respected even when a direct value and a link coexist.
+        if (inputLink !== undefined && inputLink !== null && !Array.isArray(inputLink) && typeof inputLink === 'string') {
+           return inputLink;
         }
       }
     }
@@ -167,7 +190,7 @@ function extractValue(node: ParserNode, rule: ParamMappingRule, state: Traversal
     }
     
     if (rule.source === 'trace') {
-        const inputLink = node.inputs[rule.input];
+        const inputLink = node.inputs?.[rule.input];
         if (inputLink && Array.isArray(inputLink)) {
             return traverseFromLink(inputLink as NodeLink, state, graph, accumulator);
         }
@@ -283,7 +306,7 @@ function selectBestPromptValue(values: any[], paramType: ComfyTraversableParam):
     });
 }
 
-export function resolve(args: { startNode: ParserNode, param: ComfyTraversableParam, graph: Graph }): any {
+export function resolve(args: { startNode: ParserNode | null, param: ComfyTraversableParam, graph: Graph }): any {
     const initialState = createInitialState(args.param);
 
     // Check if this parameter needs accumulation across multiple nodes
@@ -336,7 +359,9 @@ export function resolve(args: { startNode: ParserNode, param: ComfyTraversablePa
             }
         };
 
-        collectValues(args.startNode);
+        if (args.startNode) {
+            collectValues(args.startNode);
+        }
 
         // Remove duplicatas mantendo ordem
         const uniqueValues = Array.from(new Set(allValues));
@@ -395,7 +420,7 @@ function checkIfParamNeedsAccumulation(startNode: ParserNode | null, param: Comf
     return check(startNode);
 }
 
-export function resolveAll(args: { startNode: ParserNode, params: ComfyTraversableParam[], graph: Graph }): Record<string, any> {
+export function resolveAll(args: { startNode: ParserNode | null, params: ComfyTraversableParam[], graph: Graph }): Record<string, any> {
     const results: Record<string, any> = {};
     for (const param of args.params) {
         results[param] = resolve({ ...args, param });
@@ -411,7 +436,7 @@ export function resolveAll(args: { startNode: ParserNode, params: ComfyTraversab
  * @param args.graph - The complete workflow graph
  * @returns Structured facts about the workflow
  */
-export function resolveFacts(args: { startNode: ParserNode, graph: Graph }): WorkflowFacts {
+export function resolveFacts(args: { startNode: ParserNode | null, graph: Graph }): WorkflowFacts {
     // Resolve all individual parameters
     const prompt = resolve({ ...args, param: 'prompt' });
     const negativePrompt = resolve({ ...args, param: 'negativePrompt' });

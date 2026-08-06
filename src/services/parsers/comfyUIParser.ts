@@ -266,8 +266,9 @@ function extractAdvancedModifiers(graph: Graph): {
   for (const nodeId in graph) {
     const node = graph[nodeId];
     if (!node.class_type) continue; // Skip nodes without class_type
+    if (node.mode === 2 || node.mode === 4) continue; // muted/bypassed nodes never ran
     const classType = node.class_type.toLowerCase();
-    
+
     // ControlNet detection (only from loaders, not apply nodes)
     if (classType.includes('controlnet') && classType.includes('loader')) {
       const name = node.inputs?.control_net_name || node.inputs?.model || node.widgets_values?.[0] || 'unknown';
@@ -893,7 +894,7 @@ function selectBestFallbackPrompt(candidates: string[]): string | null {
  *  5. Return the longest candidate (heuristic).
  */
 function deepPromptReconstructor(
-  terminalNode: ParserNode,
+  terminalNode: ParserNode | null,
   graph: Graph,
   param: 'prompt' | 'negativePrompt',
 ): string | null {
@@ -925,6 +926,9 @@ function deepPromptReconstructor(
     const node = graph[nodeId];
     if (!node || !node.class_type) continue;
     if (node.mode === 2 || node.mode === 4) continue; // muted
+    // Skip loader/scaler/preview/note nodes — their widget strings are file
+    // names (e.g. "Bana.jpg", "qwen_image_vae.safetensors"), not prompt text.
+    if (/(?:Loader|Load|Scale|Preview|Note)/i.test(node.class_type)) continue;
     visited.add(nodeId);
 
     // Harvest text from this node's inputs

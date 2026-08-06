@@ -44,25 +44,29 @@ function traverse(
     return state.targetParam === 'lora' ? accumulator : null;
   }
 
-  // 1. Consciência de Estado: Ignora nós silenciados ("muted")
-  if (currentNode.mode === 2 || currentNode.mode === 4) {
-    return state.targetParam === 'lora' ? accumulator : null;
-  }
-
   const nodeDef = NodeRegistry[currentNode.class_type];
   if (!nodeDef) {
     return state.targetParam === 'lora' ? accumulator : null; // Nó desconhecido
   }
 
+  // 1. Consciência de Estado: nós silenciados (mode 2) e bypassados (mode 4)
+  //    não executam — mas um nó bypassado conecta suas entradas às saídas,
+  //    então os dados continuam fluindo por ele. Não extraímos valores dele
+  //    (suas configurações não foram aplicadas), mas seguimos a travessia
+  //    (ex: LoraLoaderModelOnly bypassado entre UNETLoader e KSampler).
+  const isSilenced = currentNode.mode === 2 || currentNode.mode === 4;
+
   // 2. Extração de Parâmetro (Caso Base ou Rastreamento)
-  const paramRule = state.targetParam !== 'generic' ? nodeDef.param_mapping?.[state.targetParam] : undefined;
-  if (paramRule) {
-    const value = extractValue(currentNode, paramRule, state, graph, accumulator);
-    if (state.targetParam === 'lora') {
-      if (value) accumulator.push(...(Array.isArray(value) ? value : [value]));
-      // Para LoRA, a travessia continua pelo caminho do modelo
-    } else if (value !== null) {
-      return value; // Valor encontrado, termina a busca para este parâmetro
+  if (!isSilenced) {
+    const paramRule = state.targetParam !== 'generic' ? nodeDef.param_mapping?.[state.targetParam] : undefined;
+    if (paramRule) {
+      const value = extractValue(currentNode, paramRule, state, graph, accumulator);
+      if (state.targetParam === 'lora') {
+        if (value) accumulator.push(...(Array.isArray(value) ? value : [value]));
+        // Para LoRA, a travessia continua pelo caminho do modelo
+      } else if (value !== null) {
+        return value; // Valor encontrado, termina a busca para este parâmetro
+      }
     }
   }
 
@@ -302,7 +306,7 @@ function selectBestPromptValue(values: any[], paramType: ComfyTraversableParam):
     });
 }
 
-export function resolve(args: { startNode: ParserNode, param: ComfyTraversableParam, graph: Graph }): any {
+export function resolve(args: { startNode: ParserNode | null, param: ComfyTraversableParam, graph: Graph }): any {
     const initialState = createInitialState(args.param);
 
     // Check if this parameter needs accumulation across multiple nodes
@@ -355,7 +359,9 @@ export function resolve(args: { startNode: ParserNode, param: ComfyTraversablePa
             }
         };
 
-        collectValues(args.startNode);
+        if (args.startNode) {
+            collectValues(args.startNode);
+        }
 
         // Remove duplicatas mantendo ordem
         const uniqueValues = Array.from(new Set(allValues));
@@ -414,7 +420,7 @@ function checkIfParamNeedsAccumulation(startNode: ParserNode | null, param: Comf
     return check(startNode);
 }
 
-export function resolveAll(args: { startNode: ParserNode, params: ComfyTraversableParam[], graph: Graph }): Record<string, any> {
+export function resolveAll(args: { startNode: ParserNode | null, params: ComfyTraversableParam[], graph: Graph }): Record<string, any> {
     const results: Record<string, any> = {};
     for (const param of args.params) {
         results[param] = resolve({ ...args, param });
@@ -430,7 +436,7 @@ export function resolveAll(args: { startNode: ParserNode, params: ComfyTraversab
  * @param args.graph - The complete workflow graph
  * @returns Structured facts about the workflow
  */
-export function resolveFacts(args: { startNode: ParserNode, graph: Graph }): WorkflowFacts {
+export function resolveFacts(args: { startNode: ParserNode | null, graph: Graph }): WorkflowFacts {
     // Resolve all individual parameters
     const prompt = resolve({ ...args, param: 'prompt' });
     const negativePrompt = resolve({ ...args, param: 'negativePrompt' });

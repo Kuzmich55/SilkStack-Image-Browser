@@ -23,12 +23,16 @@ export interface ParserNode {
   inputs: Record<string, any[] | any>;
   widgets_values?: any[];
   mode?: number; // Para detectar nós silenciados (0: ativo, 2/4: mudo/bypass)
+  // Original input definitions from the workflow JSON (name + slot order).
+  // Used as a fallback for slot-based input-name resolution when the
+  // registry doesn't declare the full input list (e.g. custom nodes).
+  _json_inputs?: any;
 }
 
 export type ComfyNodeDataType =
   | 'MODEL' | 'CONDITIONING' | 'LATENT' | 'IMAGE' | 'VAE' | 'CLIP' | 'INT'
   | 'FLOAT' | 'STRING' | 'CONTROL_NET' | 'GUIDER' | 'SAMPLER' | 'SCHEDULER'
-  | 'SIGMAS' | 'NOISE' | 'UPSCALE_MODEL' | 'MASK' | 'ANY' | 'LORA_STACK' | 'SDXL_TUPLE';
+  | 'SIGMAS' | 'NOISE' | 'UPSCALE_MODEL' | 'MASK' | 'ANY' | 'LORA_STACK' | 'SDXL_TUPLE' | 'BOOLEAN';
 
 export type ComfyTraversableParam =
   | 'prompt' | 'negativePrompt' | 'seed' | 'steps' | 'cfg' | 'width' | 'height'
@@ -177,6 +181,25 @@ export const NodeRegistry: Record<string, NodeDefinition> = {
     pass_through_rules: [{ from_input: 'image', to_output: 'IMAGE' }],
     widget_order: ['seed', 'steps', 'cfg', 'sampler_name', 'scheduler', 'denoise']
   },
+  CLIPTextEncodeSDXL: {
+    category: 'CONDITIONING', roles: ['SOURCE'],
+    inputs: { clip: { type: 'CLIP' } },
+    outputs: { CONDITIONING: { type: 'CONDITIONING' } },
+    param_mapping: {
+      prompt: { source: 'widget', key: 'text_g' },
+      negativePrompt: { source: 'widget', key: 'text_l' }
+    },
+    widget_order: ['width', 'height', 'crop_w', 'crop_h', 'target_width', 'target_height', 'text_g', 'text_l']
+  },
+  CLIPTextEncodeSDXLRefiner: {
+    category: 'CONDITIONING', roles: ['SOURCE'],
+    inputs: { clip: { type: 'CLIP' } },
+    outputs: { CONDITIONING: { type: 'CONDITIONING' } },
+    param_mapping: {
+      prompt: { source: 'widget', key: 'text' }
+    },
+    widget_order: ['ascore', 'width', 'height', 'text']
+  },
 
   // --- TRANSFORM & PASS-THROUGH NODES ---
   CLIPTextEncode: {
@@ -188,10 +211,8 @@ export const NodeRegistry: Record<string, NodeDefinition> = {
         extractor: (node, state, graph, traverse) => {
           // If text comes from a link (like String Literal), trace it
           const textInput = node.inputs?.text;
-          console.log(`[DEBUG] CLIPTextEncode extractor textInput:`, textInput);
           if (textInput && Array.isArray(textInput)) {
             const result = traverse(textInput as any, { ...state, targetParam: 'prompt' }, graph, []);
-            console.log(`[DEBUG] CLIPTextEncode traverse returned:`, result);
             if (result) return result;
           }
           // If text is a direct value in inputs, use it
@@ -231,6 +252,34 @@ export const NodeRegistry: Record<string, NodeDefinition> = {
     outputs: { CONDITIONING: { type: 'CONDITIONING' } },
     param_mapping: { prompt: { source: 'trace', input: 'conditioning' }, negativePrompt: { source: 'trace', input: 'conditioning' }, },
     pass_through_rules: [{ from_input: 'conditioning', to_output: 'CONDITIONING' }],
+  },
+  ConditioningAverage: {
+    category: 'CONDITIONING', roles: ['TRANSFORM'],
+    inputs: { conditioning_to: { type: 'CONDITIONING' }, conditioning_from: { type: 'CONDITIONING' } },
+    outputs: { CONDITIONING: { type: 'CONDITIONING' } },
+    param_mapping: { prompt: { source: 'trace', input: 'conditioning_to' } },
+    pass_through_rules: [{ from_input: 'conditioning_to', to_output: 'CONDITIONING' }]
+  },
+  ConditioningCombine: {
+    category: 'CONDITIONING', roles: ['TRANSFORM'],
+    inputs: { conditioning_1: { type: 'CONDITIONING' }, conditioning_2: { type: 'CONDITIONING' } },
+    outputs: { CONDITIONING: { type: 'CONDITIONING' } },
+    param_mapping: { prompt: { source: 'trace', input: 'conditioning_1' } },
+    pass_through_rules: [{ from_input: 'conditioning_1', to_output: 'CONDITIONING' }]
+  },
+  ConditioningSetArea: {
+    category: 'CONDITIONING', roles: ['TRANSFORM'],
+    inputs: { conditioning: { type: 'CONDITIONING' } },
+    outputs: { CONDITIONING: { type: 'CONDITIONING' } },
+    param_mapping: { prompt: { source: 'trace', input: 'conditioning' } },
+    pass_through_rules: [{ from_input: 'conditioning', to_output: 'CONDITIONING' }]
+  },
+  ConditioningConcat: {
+    category: 'CONDITIONING', roles: ['TRANSFORM'],
+    inputs: { conditioning_to: { type: 'CONDITIONING' }, conditioning_from: { type: 'CONDITIONING' } },
+    outputs: { CONDITIONING: { type: 'CONDITIONING' } },
+    param_mapping: { prompt: { source: 'trace', input: 'conditioning_to' } },
+    pass_through_rules: [{ from_input: 'conditioning_to', to_output: 'CONDITIONING' }]
   },
   LoraLoader: {
     category: 'LOADING', roles: ['TRANSFORM'],
@@ -297,12 +346,37 @@ export const NodeRegistry: Record<string, NodeDefinition> = {
     category: 'IO', roles: ['TRANSFORM'],
     inputs: { samples: { type: 'LATENT' }, vae: { type: 'VAE' }, },
     outputs: { IMAGE: { type: 'IMAGE' } },
-    param_mapping: { vae: { source: 'trace', input: 'vae' }, },
+    param_mapping: {
+      prompt: { source: 'trace', input: 'samples' },
+      negativePrompt: { source: 'trace', input: 'samples' },
+      seed: { source: 'trace', input: 'samples' },
+      steps: { source: 'trace', input: 'samples' },
+      cfg: { source: 'trace', input: 'samples' },
+      model: { source: 'trace', input: 'samples' },
+      sampler_name: { source: 'trace', input: 'samples' },
+      scheduler: { source: 'trace', input: 'samples' },
+      lora: { source: 'trace', input: 'samples' },
+      denoise: { source: 'trace', input: 'samples' },
+      vae: { source: 'trace', input: 'vae' }
+    },
     pass_through_rules: [{ from_input: 'samples', to_output: 'IMAGE' }]
   },
   SaveImageWithMetaData: {
     category: 'IO', roles: ['SINK'],
     inputs: { images: { type: 'IMAGE' } }, outputs: {},
+    param_mapping: {
+      prompt: { source: 'trace', input: 'images' },
+      negativePrompt: { source: 'trace', input: 'images' },
+      seed: { source: 'trace', input: 'images' },
+      steps: { source: 'trace', input: 'images' },
+      cfg: { source: 'trace', input: 'images' },
+      model: { source: 'trace', input: 'images' },
+      sampler_name: { source: 'trace', input: 'images' },
+      scheduler: { source: 'trace', input: 'images' },
+      vae: { source: 'trace', input: 'images' },
+      lora: { source: 'trace', input: 'images' },
+      denoise: { source: 'trace', input: 'images' }
+    },
     widget_order: ['filename_prefix', 'subdirectory_name', 'output_format', 'quality', 'metadata_scope', 'include_batch_num', 'prefer_nearest']
   },
 
@@ -311,13 +385,59 @@ export const NodeRegistry: Record<string, NodeDefinition> = {
     category: 'IO', roles: ['SINK'],
     inputs: { images: { type: 'IMAGE' } }, 
     outputs: {},
-    param_mapping: {},  // No direct params, but traverse inputs
+    param_mapping: {
+      prompt: { source: 'trace', input: 'images' },
+      negativePrompt: { source: 'trace', input: 'images' },
+      seed: { source: 'trace', input: 'images' },
+      steps: { source: 'trace', input: 'images' },
+      cfg: { source: 'trace', input: 'images' },
+      model: { source: 'trace', input: 'images' },
+      sampler_name: { source: 'trace', input: 'images' },
+      scheduler: { source: 'trace', input: 'images' },
+      vae: { source: 'trace', input: 'images' },
+      lora: { source: 'trace', input: 'images' },
+      denoise: { source: 'trace', input: 'images' }
+    },
     widget_order: ['filename_prefix']
   },
 
   PreviewImage: {
     category: 'IO', roles: ['SINK'],
     inputs: { images: { type: 'IMAGE' } }, outputs: {},
+  },
+  ShowText: {
+    category: 'UTILS', roles: ['SOURCE'],
+    inputs: { text: { type: 'STRING' } }, outputs: { STRING: { type: 'STRING' } },
+    param_mapping: { prompt: { source: 'widget', key: 'text' } },
+    widget_order: ['text']
+  },
+  'Text Concatenate': {
+    category: 'UTILS', roles: ['TRANSFORM'],
+    inputs: { text1: { type: 'STRING' }, text2: { type: 'STRING' }, text3: { type: 'STRING' }, text4: { type: 'STRING' } },
+    outputs: { STRING: { type: 'STRING' } },
+    param_mapping: {
+      prompt: {
+        source: 'custom_extractor',
+        extractor: (node, state, graph, traverseFromLink) => {
+          return extractors.concatTextExtractor(node, state, graph, traverseFromLink, ['text1', 'text2', 'text3', 'text4'], 'delimiter');
+        }
+      }
+    },
+    widget_order: ['text1', 'text2', 'text3', 'text4', 'delimiter']
+  },
+  'String Concatenate': {
+    category: 'UTILS', roles: ['TRANSFORM'],
+    inputs: { string1: { type: 'STRING' }, string2: { type: 'STRING' }, string3: { type: 'STRING' }, string4: { type: 'STRING' } },
+    outputs: { STRING: { type: 'STRING' } },
+    param_mapping: {
+      prompt: {
+        source: 'custom_extractor',
+        extractor: (node, state, graph, traverseFromLink) => {
+          return extractors.concatTextExtractor(node, state, graph, traverseFromLink, ['string1', 'string2', 'string3', 'string4'], 'delimiter');
+        }
+      }
+    },
+    widget_order: ['string1', 'string2', 'string3', 'string4', 'delimiter']
   },
 
   // --- UTILS & PRIMITIVES ---
@@ -460,6 +580,48 @@ export const NodeRegistry: Record<string, NodeDefinition> = {
       cfg: { source: 'widget', key: 'guidance' }
     },
     widget_order: ['clip_l', 't5xxl', 'guidance']
+  },
+
+  // Qwen-Image / Qwen-Image-Edit text encoders — the prompt text is a single
+  // widget at index 0 (clip/vae/image come in via links).
+  TextEncodeQwenImageEditPlus: {
+    category: 'CONDITIONING', roles: ['SOURCE'],
+    inputs: { clip: { type: 'CLIP' }, vae: { type: 'VAE' }, image1: { type: 'IMAGE' }, image2: { type: 'IMAGE' }, image3: { type: 'IMAGE' } },
+    outputs: { CONDITIONING: { type: 'CONDITIONING' } },
+    param_mapping: {
+      prompt: { source: 'widget', key: 'text' },
+      negativePrompt: { source: 'widget', key: 'text' },
+    },
+    widget_order: ['text']
+  },
+  TextEncodeQwenImageEdit: {
+    category: 'CONDITIONING', roles: ['SOURCE'],
+    inputs: { clip: { type: 'CLIP' }, image1: { type: 'IMAGE' }, image2: { type: 'IMAGE' } },
+    outputs: { CONDITIONING: { type: 'CONDITIONING' } },
+    param_mapping: {
+      prompt: { source: 'widget', key: 'text' },
+      negativePrompt: { source: 'widget', key: 'text' },
+    },
+    widget_order: ['text']
+  },
+  TextEncodeQwenImage: {
+    category: 'CONDITIONING', roles: ['SOURCE'],
+    inputs: { clip: { type: 'CLIP' } },
+    outputs: { CONDITIONING: { type: 'CONDITIONING' } },
+    param_mapping: {
+      prompt: { source: 'widget', key: 'text' },
+      negativePrompt: { source: 'widget', key: 'text' },
+    },
+    widget_order: ['text']
+  },
+
+  // Newer core node that patches the model and passes it through unchanged.
+  CFGNorm: {
+    category: 'TRANSFORM', roles: ['PASS_THROUGH'],
+    inputs: { model: { type: 'MODEL' } },
+    outputs: { MODEL: { type: 'MODEL' } },
+    param_mapping: {},
+    pass_through_rules: [{ from_input: 'model', to_output: 'MODEL' }]
   },
 
   ACE_TextGoogleTranslate: {
@@ -612,7 +774,9 @@ export const NodeRegistry: Record<string, NodeDefinition> = {
 
   ComfySwitchNode: {
     category: 'ROUTING', roles: ['ROUTING'],
-    inputs: { switch: { type: 'BOOLEAN' }, on_true: { type: 'ANY' }, on_false: { type: 'ANY' } },
+    // Order matters for linking by index when names are missing in links array:
+    // slot 0: on_false, slot 1: on_true, slot 2: switch
+    inputs: { on_false: { type: 'ANY' }, on_true: { type: 'ANY' }, switch: { type: 'BOOLEAN' } },
     outputs: { output: { type: 'ANY' } },
     conditional_routing: {
         control_input: 'switch',
@@ -638,7 +802,16 @@ export const NodeRegistry: Record<string, NodeDefinition> = {
 
   TextGenerate: {
     category: 'TRANSFORM', roles: ['PASS_THROUGH'],
-    inputs: { prompt: { type: 'ANY' } },
+    // Real node has 5 inputs in this order: clip, image, video, audio, prompt.
+    // Declaring all of them keeps slot-based input-name resolution correct
+    // (Object.keys order must match the node's actual input order).
+    inputs: {
+      clip: { type: 'CLIP' },
+      image: { type: 'IMAGE' },
+      video: { type: 'IMAGE' },
+      audio: { type: 'ANY' },
+      prompt: { type: 'ANY' }
+    },
     outputs: { generated_text: { type: 'STRING' } },
     param_mapping: { prompt: { source: 'trace', input: 'prompt' } },
     pass_through_rules: [{ from_input: 'prompt', to_output: 'generated_text' }]
@@ -649,7 +822,7 @@ export const NodeRegistry: Record<string, NodeDefinition> = {
     inputs: { string_a: { type: 'ANY' }, string_b: { type: 'ANY' } },
     outputs: { STRING: { type: 'STRING' } },
     param_mapping: {},
-    pass_through_rules: [{ from_input: 'string_b', to_output: 'STRING' }] // Prefer string_b (often user prompt over system prompt)
+    pass_through_rules: [{ from_input: 'string_b', to_output: 'STRING' }, { from_input: 'string_a', to_output: 'STRING' }] // Prefer string_b
   },
 
   ScaledFP8HybridUNetLoader: {
@@ -1451,5 +1624,64 @@ PrimitiveNode: {
     denoise: { source: 'widget', key: 'value' }
   },
   widget_order: ['value', 'control_after_generate']
+},
+
+'Power Lora Loader (rgthree)': {
+  category: 'LOADING',
+  roles: ['TRANSFORM'],
+  inputs: {
+    model: { type: 'MODEL' },
+    clip: { type: 'CLIP' }
+  },
+  outputs: {
+    MODEL: { type: 'MODEL' },
+    CLIP: { type: 'CLIP' }
+  },
+  param_mapping: {
+    lora: {
+      source: 'custom_extractor',
+      accumulate: true,
+      extractor: (node: ParserNode) => {
+        const loras: string[] = [];
+        if (node.widgets_values && Array.isArray(node.widgets_values)) {
+          for (const entry of node.widgets_values) {
+            if (entry && typeof entry === 'object' && entry.on && entry.lora) {
+              let loraPath = String(entry.lora);
+              
+              // Remove common prefixes
+              loraPath = loraPath.replace(/^(?:flux|Flux|FLUX)[\/\-\s]+/i, '');
+              
+              // Remove .safetensors extension
+              loraPath = loraPath.replace(/\.safetensors$/i, '');
+              
+              // Clean extra spaces
+              loraPath = loraPath.trim();
+              
+              if (loraPath) {
+                loras.push(loraPath);
+              }
+            }
+          }
+        }
+        return loras;
+      }
+    },
+    model: { source: 'trace', input: 'model' }
+  },
+  pass_through_rules: [
+    { from_input: 'model', to_output: 'MODEL' },
+    { from_input: 'clip', to_output: 'CLIP' }
+  ]
+},
+
+PathchSageAttentionKJ: {
+  category: 'TRANSFORM',
+  roles: ['PASS_THROUGH'],
+  inputs: { model: { type: 'MODEL' } },
+  outputs: { MODEL: { type: 'MODEL' } },
+  param_mapping: {},
+  widget_order: ['sage_attention', 'allow_compile'],
+  pass_through_rules: [{ from_input: 'model', to_output: 'MODEL' }]
 }
 };
+

@@ -582,6 +582,48 @@ export const NodeRegistry: Record<string, NodeDefinition> = {
     widget_order: ['clip_l', 't5xxl', 'guidance']
   },
 
+  // Qwen-Image / Qwen-Image-Edit text encoders — the prompt text is a single
+  // widget at index 0 (clip/vae/image come in via links).
+  TextEncodeQwenImageEditPlus: {
+    category: 'CONDITIONING', roles: ['SOURCE'],
+    inputs: { clip: { type: 'CLIP' }, vae: { type: 'VAE' }, image1: { type: 'IMAGE' }, image2: { type: 'IMAGE' }, image3: { type: 'IMAGE' } },
+    outputs: { CONDITIONING: { type: 'CONDITIONING' } },
+    param_mapping: {
+      prompt: { source: 'widget', key: 'text' },
+      negativePrompt: { source: 'widget', key: 'text' },
+    },
+    widget_order: ['text']
+  },
+  TextEncodeQwenImageEdit: {
+    category: 'CONDITIONING', roles: ['SOURCE'],
+    inputs: { clip: { type: 'CLIP' }, image1: { type: 'IMAGE' }, image2: { type: 'IMAGE' } },
+    outputs: { CONDITIONING: { type: 'CONDITIONING' } },
+    param_mapping: {
+      prompt: { source: 'widget', key: 'text' },
+      negativePrompt: { source: 'widget', key: 'text' },
+    },
+    widget_order: ['text']
+  },
+  TextEncodeQwenImage: {
+    category: 'CONDITIONING', roles: ['SOURCE'],
+    inputs: { clip: { type: 'CLIP' } },
+    outputs: { CONDITIONING: { type: 'CONDITIONING' } },
+    param_mapping: {
+      prompt: { source: 'widget', key: 'text' },
+      negativePrompt: { source: 'widget', key: 'text' },
+    },
+    widget_order: ['text']
+  },
+
+  // Newer core node that patches the model and passes it through unchanged.
+  CFGNorm: {
+    category: 'TRANSFORM', roles: ['PASS_THROUGH'],
+    inputs: { model: { type: 'MODEL' } },
+    outputs: { MODEL: { type: 'MODEL' } },
+    param_mapping: {},
+    pass_through_rules: [{ from_input: 'model', to_output: 'MODEL' }]
+  },
+
   ACE_TextGoogleTranslate: {
     category: 'UTILS', roles: ['SOURCE'],
     inputs: {},
