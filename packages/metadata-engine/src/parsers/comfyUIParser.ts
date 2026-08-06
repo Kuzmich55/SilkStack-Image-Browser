@@ -314,6 +314,20 @@ function extractAdvancedModifiers(graph: Graph): {
           }
         }
       }
+      // API-format prompts keep the LoRA list in inputs (lora_1..lora_N)
+      // instead of widgets_values — each entry is { on, lora, strength }.
+      if (node.inputs) {
+        for (const [key, value] of Object.entries(node.inputs)) {
+          if (/^lora_\d+$/i.test(key) && value && typeof value === 'object' && (value as any).on === true && (value as any).lora) {
+            let loraPath = String((value as any).lora);
+            loraPath = loraPath.replace(/^(?:flux|Flux|FLUX)[\/\-\s]+/i, '');
+            loraPath = loraPath.replace(/\.safetensors$/i, '').trim();
+            if (loraPath) {
+              loras.push({ name: loraPath, weight: (value as any).strength ?? 1.0 });
+            }
+          }
+        }
+      }
     } else if (classType.includes('lora') && classType !== 'power lora loader (rgthree)') {
       // Standard LoRA loaders (LoraLoader, LoraLoaderModelOnly, etc.)
       let name = node.inputs?.lora_name || node.widgets_values?.[0] || 'unknown';
@@ -972,6 +986,18 @@ function deepPromptReconstructor(
 }
 
 /**
+ * Detects the ComfyUI API/execution prompt format: a map of
+ * nodeId → { class_type, inputs } (optionally with _meta). The UI workflow
+ * format instead has `nodes`/`links` arrays at the top level.
+ */
+function isApiPromptFormat(value: any): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  return Object.values(value).some(
+    (v: any) => v && typeof v === 'object' && typeof v.class_type === 'string'
+  );
+}
+
+/**
  * Ponto de entrada principal. Resolve todos os parâmetros de metadados de um grafo.
  */
 export function resolvePromptFromGraph(workflow: any, prompt: any): Record<string, any> {
@@ -984,6 +1010,19 @@ export function resolvePromptFromGraph(workflow: any, prompt: any): Record<strin
   }
   if (typeof parsedPrompt === 'string') {
     try { parsedPrompt = JSON.parse(parsedPrompt); } catch { /* keep as-is */ }
+  }
+
+  // ── FORMAT NORMALIZATION ─────────────────────────────────────────────
+  // ComfyUI metadata arrives in two shapes:
+  //   UI  format: { nodes: [...], links: [...], definitions: {...} }
+  //   API format: { "<nodeId>": { class_type, inputs }, ... }
+  // Various save/export paths store the API format under the "workflow"
+  // key (no nodes/links arrays). Detect it and promote it to the prompt
+  // slot — otherwise the graph builder sees an empty workflow and nothing
+  // is extracted.
+  if (!parsedPrompt && isApiPromptFormat(parsedWorkflow)) {
+    parsedPrompt = parsedWorkflow;
+    parsedWorkflow = undefined;
   }
 
   const telemetry = {

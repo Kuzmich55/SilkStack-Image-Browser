@@ -1643,23 +1643,31 @@ PrimitiveNode: {
       accumulate: true,
       extractor: (node: ParserNode) => {
         const loras: string[] = [];
+        const collect = (rawName: string) => {
+          let loraPath = rawName
+            // Remove common prefixes
+            .replace(/^(?:flux|Flux|FLUX)[\/\-\s]+/i, '')
+            // Remove .safetensors extension
+            .replace(/\.safetensors$/i, '')
+            // Clean extra spaces
+            .trim();
+          if (loraPath) {
+            loras.push(loraPath);
+          }
+        };
         if (node.widgets_values && Array.isArray(node.widgets_values)) {
           for (const entry of node.widgets_values) {
             if (entry && typeof entry === 'object' && entry.on && entry.lora) {
-              let loraPath = String(entry.lora);
-              
-              // Remove common prefixes
-              loraPath = loraPath.replace(/^(?:flux|Flux|FLUX)[\/\-\s]+/i, '');
-              
-              // Remove .safetensors extension
-              loraPath = loraPath.replace(/\.safetensors$/i, '');
-              
-              // Clean extra spaces
-              loraPath = loraPath.trim();
-              
-              if (loraPath) {
-                loras.push(loraPath);
-              }
+              collect(String(entry.lora));
+            }
+          }
+        }
+        // API-format prompts keep the LoRA list in inputs (lora_1..lora_N)
+        // instead of widgets_values — each entry is { on, lora, strength }.
+        if (node.inputs) {
+          for (const [key, value] of Object.entries(node.inputs)) {
+            if (/^lora_\d+$/i.test(key) && value && typeof value === 'object' && (value as any).on && (value as any).lora) {
+              collect(String((value as any).lora));
             }
           }
         }
