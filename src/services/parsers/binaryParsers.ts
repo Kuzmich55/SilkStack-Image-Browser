@@ -103,6 +103,207 @@ function extractComfyFromTiffMakeModel(tiff: Uint8Array): ImageMetadata | null {
     return result;
 }
 
+/**
+ * Minimal MP4 metadata (mdta) walker: reads the Apple-style keys/ilst pair
+ * inside moov → udta → meta. ComfyUI save nodes write their metadata there:
+ *   keys:   mdta "workflow", mdta "prompt", mdta "encoder", ...
+ *   ilst:   1 → workflow JSON (UI graph), 2 → prompt JSON (execution prompt), ...
+ * ffprobe surfaces the same tags (format.tags.*) but is not guaranteed to be
+ * installed — this is pure byte math over the boxes, so it also works on the
+ * 64 KB head-read buffers the indexer already has in memory (faststart MP4s
+ * put moov first). Returns every string tag found, keyed by its mdta name.
+ */
+export function extractMp4MdtaTags(bytes: Uint8Array): Record<string, string> {
+    const tags: Record<string, string> = {};
+    const len = bytes.length;
+    if (len < 24) return tags;
+
+    const readU32 = (o: number): number =>
+        o + 4 <= len
+            ? ((bytes[o] * 0x1000000 + bytes[o + 1] * 0x10000 + bytes[o + 2] * 0x100 + bytes[o + 3]) >>> 0)
+            : 0;
+    const fourccAt = (o: number): string =>
+        o + 4 <= len
+            ? String.fromCharCode(bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3])
+            : '';
+    const decode = (start: number, end: number): string =>
+        new TextDecoder().decode(bytes.subarray(start, end));
+
+    // Box byte range at `off`, or null when truncated/invalid.
+    // Handles 64-bit extended sizes (size == 1) and size == 0 (to end of buffer).
+    const boxRange = (off: number): [number, number] | null => {
+        if (off + 8 > len) return null;
+        let size = readU32(off);
+        if (size === 1) {
+            if (off + 16 > len) return null;
+            size = readU32(off + 8) * 0x100000000 + readU32(off + 12);
+        } else if (size === 0) {
+            size = len - off;
+        }
+        if (size < 8 || off + size > len) return null;
+        return [off, off + size];
+    };
+
+    const walkBoxes = (
+        start: number,
+        end: number,
+        visitor: (fourcc: string, boxStart: number, boxEnd: number) => void,
+    ): void => {
+        let off = start;
+        while (off + 8 <= end) {
+            const range = boxRange(off);
+            if (!range) break;
+            visitor(fourccAt(off + 4), range[0], range[1]);
+            off = range[1];
+        }
+    };
+
+    // Locate moov → (udta →) meta
+    let metaStart = -1;
+    let metaEnd = -1;
+    walkBoxes(0, len, (fourcc, bs, be) => {
+        if (fourcc !== 'moov' || metaStart >= 0) return;
+        walkBoxes(bs + 8, be, (sub, sbs, sbe) => {
+            if (sub === 'meta') {
+                metaStart = sbs;
+                metaEnd = sbe;
+            } else if (sub === 'udta') {
+                walkBoxes(sbs + 8, sbe, (sub2, tbs, tbe) => {
+                    if (sub2 === 'meta') {
+                        metaStart = tbs;
+                        metaEnd = tbe;
+                    }
+                });
+            }
+        });
+    });
+    if (metaStart < 0) return tags;
+
+    // meta is a full box (version/flags before the children)
+    const contentStart = metaStart + 12;
+
+    // keys: [count u32][entry: size u32, "mdta", name\0]
+    const keyNames: string[] = [];
+    walkBoxes(contentStart, metaEnd, (fourcc, bs, be) => {
+        if (fourcc !== 'keys') return;
+        let o = bs + 12;
+        const count = o + 4 <= be ? readU32(o) : 0;
+        o += 4;
+        for (let i = 0; i < count && o + 8 <= be; i++) {
+            const esize = readU32(o);
+            if (esize < 8 || o + esize > be) break;
+            let nameEnd = o + 8;
+            while (nameEnd < o + esize && bytes[nameEnd] !== 0) nameEnd++;
+            keyNames.push(decode(o + 8, nameEnd));
+            o += esize;
+        }
+    });
+
+    // ilst: [entry: size u32, index u32, data box...]
+    const values: Record<number, string> = {};
+    walkBoxes(contentStart, metaEnd, (fourcc, bs, be) => {
+        if (fourcc !== 'ilst') return;
+        let o = bs + 8;
+        while (o + 8 <= be) {
+            const esize = readU32(o);
+            if (esize < 8 || o + esize > be) break;
+            const index = readU32(o + 4);
+            let d = o + 8;
+            while (d + 8 <= o + esize) {
+                const dsize = readU32(d);
+                if (dsize < 8 || d + dsize > o + esize) break;
+                if (fourccAt(d + 4) === 'data' && dsize >= 16 && readU32(d + 8) === 1) {
+                    // kind == 1 → UTF-8 string payload
+                    values[index] = decode(d + 16, d + dsize);
+                }
+                d += dsize;
+            }
+            o += esize;
+        }
+    });
+
+    keyNames.forEach((name, i) => {
+        const value = values[i + 1];
+        if (value !== undefined) tags[name] = value;
+    });
+    return tags;
+}
+
+/**
+ * MP4 track-header (tkhd) dimension reader: moov → trak → tkhd.
+ * The last 8 bytes of a tkhd payload are the display width/height as
+ * 16.16 fixed-point values (video track). Audio tracks have 0x0 there,
+ * so we take the first track with non-zero dimensions.
+ *
+ * Same box-walking strategy as extractMp4MdtaTags — pure byte math, no
+ * ffprobe. Needed because ffprobe is not guaranteed to be installed: the
+ * indexer already holds these bytes (faststart MP4s put moov at the front
+ * of the 64 KB head read), so dimensions can be resolved dependency-free.
+ */
+export function extractMp4Dimensions(bytes: Uint8Array): { width: number; height: number } | null {
+    const len = bytes.length;
+    if (len < 24) return null;
+
+    const readU32 = (o: number): number =>
+        o + 4 <= len
+            ? ((bytes[o] * 0x1000000 + bytes[o + 1] * 0x10000 + bytes[o + 2] * 0x100 + bytes[o + 3]) >>> 0)
+            : 0;
+    const fourccAt = (o: number): string =>
+        o + 4 <= len
+            ? String.fromCharCode(bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3])
+            : '';
+
+    const boxRange = (off: number): [number, number] | null => {
+        if (off + 8 > len) return null;
+        let size = readU32(off);
+        if (size === 1) {
+            if (off + 16 > len) return null;
+            size = readU32(off + 8) * 0x100000000 + readU32(off + 12);
+        } else if (size === 0) {
+            size = len - off;
+        }
+        if (size < 8 || off + size > len) return null;
+        return [off, off + size];
+    };
+
+    const walkBoxes = (
+        start: number,
+        end: number,
+        visitor: (fourcc: string, boxStart: number, boxEnd: number) => void,
+    ): void => {
+        let off = start;
+        while (off + 8 <= end) {
+            const range = boxRange(off);
+            if (!range) break;
+            visitor(fourccAt(off + 4), range[0], range[1]);
+            off = range[1];
+        }
+    };
+
+    // moov → trak → tkhd. tkhd is a full box (version/flags first).
+    let result: { width: number; height: number } | null = null;
+    walkBoxes(0, len, (fourcc, bs, be) => {
+        if (fourcc !== 'moov' || result) return;
+        walkBoxes(bs + 8, be, (sub, sbs, sbe) => {
+            if (sub !== 'trak' || result) return;
+            walkBoxes(sbs + 8, sbe, (sub2, tbs, tbe) => {
+                if (sub2 !== 'tkhd' || result) return;
+                const version = tbs + 8 < len ? bytes[tbs + 8] : 0;
+                // Version 0: width at payload+72, version 1: payload+84
+                const widthOff = tbs + 12 + (version === 1 ? 84 : 72);
+                const heightOff = widthOff + 4;
+                if (widthOff + 8 > tbe) return;
+                const width = readU32(widthOff) >> 16;
+                const height = readU32(heightOff) >> 16;
+                if (width > 0 && height > 0) {
+                    result = { width, height };
+                }
+            });
+        });
+    });
+    return result;
+}
+
 export function detectImageType(view: DataView): 'png' | 'jpeg' | 'webp' | null {
   if (view.byteLength < 12) {
     return null;

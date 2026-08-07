@@ -9,7 +9,7 @@ import { parseVideoMetaHubMetadata } from './parsers/videoMetaHubParser';
 import { parseInvokeAIMetadata } from './parsers/invokeAIParser';
 import { parseA1111Metadata } from './parsers/automatic1111Parser';
 import { parseSwarmUIMetadata } from './parsers/swarmUIParser';
-import { parseWebPMetadata } from './parsers/binaryParsers';
+import { parseWebPMetadata, extractMp4MdtaTags, extractMp4Dimensions } from './parsers/binaryParsers';
 
 // Simple throttle utility to avoid excessive progress updates
 function throttle<T extends (...args: any[]) => any>(func: T, delay: number): T {
@@ -1011,6 +1011,35 @@ async function processSingleFileOptimized(
       const videoResult = await readVideoMetadataFromElectron(fileEntry);
       rawMetadata = videoResult.rawMetadata;
       videoInfo = videoResult.videoInfo ?? null;
+
+      // Dependency-free MP4 mdta extraction: ComfyUI save nodes write the
+      // workflow/prompt as mdta tags (moov → udta → meta → keys/ilst).
+      // ffprobe is optional and often absent (readVideoMetadataFromElectron
+      // then returns null) — this walker runs on whatever bytes we already
+      // have and the tags flow into the normal ComfyUI normalization below.
+      let videoBytes: ArrayBuffer | undefined = fileData;
+      if (!videoBytes) {
+        try {
+          const file = await fileEntry.handle.getFile();
+          videoBytes = await file.arrayBuffer();
+        } catch {
+          videoBytes = undefined;
+        }
+      }
+      if (videoBytes) {
+        const mdtaTags = extractMp4MdtaTags(new Uint8Array(videoBytes));
+        if (Object.keys(mdtaTags).length > 0) {
+          rawMetadata = { ...(rawMetadata ?? {}), ...mdtaTags };
+        }
+        // MP4 dimensions live in moov→trak→tkhd. ffprobe (videoInfo) is
+        // often absent, so parse them from the same bytes we already have —
+        // otherwise width/height stay 0 and the modal can't show
+        // resolution / megapixels / aspect ratio.
+        const mp4Dims = extractMp4Dimensions(new Uint8Array(videoBytes));
+        if (mp4Dims) {
+          workerDims = mp4Dims;
+        }
+      }
     } else if (fileData) {
       // Try worker pool first for off-thread parsing
       const pool = await getMetadataPool();
@@ -2210,7 +2239,11 @@ export async function processFiles(
         return false;
       }
       const fileType = entry.source.type ?? inferMimeTypeFromName(entry.source.handle.name);
-      return fileType === 'image/png' || fileType === 'image/webp' || fileType === 'image/jpeg';
+      // Videos included: MP4 metadata (moov → udta → meta) sits at the end of
+      // the file when the muxer didn't use faststart, so the head read misses
+      // it. The full read lets extractMp4MdtaTags find it.
+      return fileType === 'image/png' || fileType === 'image/webp' || fileType === 'image/jpeg' ||
+             fileType.startsWith('video/');
     };
 
     const shouldCheckTailForMetaHub = (

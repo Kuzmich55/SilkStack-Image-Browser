@@ -812,6 +812,18 @@ const ImageModal: React.FC<ImageModalProps> = ({
   const nMeta: BaseMetadata | undefined = image.metadata?.normalizedMetadata;
   const effectiveMetadata = nMeta;
 
+  // File-level dimensions: prefer normalized metadata, fall back to the
+  // "WxH" string the indexer stores (read from the actual file bytes — e.g.
+  // MP4 tkhd track headers — so it exists even without generation metadata).
+  const [fileWidth, fileHeight]: [number | null, number | null] = (() => {
+    if (nMeta?.width && nMeta?.height) return [nMeta.width, nMeta.height];
+    const match = image.dimensions?.match(/(\d+)\s*x\s*(\d+)/i);
+    if (match && Number(match[1]) > 0 && Number(match[2]) > 0) {
+      return [Number(match[1]), Number(match[2])];
+    }
+    return [null, null];
+  })();
+
   const effectiveDuration = (nMeta as any)?.video?.duration_seconds;
 
   const videoInfo = (nMeta as any)?.video;
@@ -1712,6 +1724,35 @@ const ImageModal: React.FC<ImageModalProps> = ({
             </div>
           </div>
 
+          {/* File parameters — always visible. Resolution/megapixels/aspect
+              ratio come from the file itself (actual dimensions), not from
+              generation metadata, so they must not depend on nMeta. */}
+          <div className="grid grid-cols-2 gap-3">
+            <MetadataItem
+              label="Dimensions"
+              value={fileWidth && fileHeight ? `${fileWidth}x${fileHeight}` : undefined}
+            />
+            <MetadataItem
+              label="Megapixels"
+              value={
+                fileWidth && fileHeight
+                  ? `${((fileWidth * fileHeight) / 1_000_000).toFixed(2)} MP`
+                  : undefined
+              }
+            />
+            <MetadataItem
+              label="Aspect Ratio"
+              value={
+                getAspectRatio(fileWidth ?? undefined, fileHeight ?? undefined) ||
+                undefined
+              }
+            />
+            <MetadataItem
+              label="File Size"
+              value={formatFileSize(image.fileSize)}
+            />
+          </div>
+
           {nMeta ? (
             <div className="space-y-4">
               {/* Prompt Section - Always Visible */}
@@ -1735,33 +1776,6 @@ const ImageModal: React.FC<ImageModalProps> = ({
                     )
                   }
                 />
-
-
-                <div className="grid grid-cols-2 gap-3">
-                  <MetadataItem
-                    label="Dimensions"
-                    value={nMeta.width && nMeta.height ? `${nMeta.width}x${nMeta.height}` : undefined}
-                  />
-                  <MetadataItem
-                    label="Megapixels"
-                    value={
-                      effectiveMetadata.width && effectiveMetadata.height
-                        ? `${((effectiveMetadata.width * effectiveMetadata.height) / 1_000_000).toFixed(2)} MP`
-                        : undefined
-                    }
-                  />
-                  <MetadataItem
-                    label="Aspect Ratio"
-                    value={
-                      getAspectRatio(effectiveMetadata.width, effectiveMetadata.height) ||
-                      undefined
-                    }
-                  />
-                  <MetadataItem
-                    label="File Size"
-                    value={formatFileSize(image.fileSize)}
-                  />
-                </div>
               </div>
 
               {/* Details Section - Collapsible */}

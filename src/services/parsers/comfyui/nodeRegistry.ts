@@ -615,6 +615,42 @@ export const NodeRegistry: Record<string, NodeDefinition> = {
     widget_order: ['text']
   },
 
+  // MiniMax H3 video model (text-to-video / first-last-frame image-to-video).
+  // Produces the CONDITIONING consumed by the sampler guider directly, with the
+  // prompt carried in its `prompt` input (execution value — the subgraph
+  // template default in widgets_values must NOT win; see TEXT_INPUT_NAMES).
+  MiniMaxH3ImageToVideo: {
+    category: 'SAMPLING', roles: ['SOURCE'],
+    inputs: {
+      clip: { type: 'CLIP' }, vae: { type: 'VAE' },
+      first_frame: { type: 'IMAGE' }, last_frame: { type: 'IMAGE' },
+      prompt: { type: 'STRING' }, width: { type: 'INT' }, height: { type: 'INT' }, length: { type: 'INT' },
+    },
+    outputs: { CONDITIONING: { type: 'CONDITIONING' }, LATENT: { type: 'LATENT' } },
+    param_mapping: {
+      prompt: { source: 'input', key: 'prompt' },
+      negativePrompt: { source: 'input', key: 'negative_prompt' },
+      width: { source: 'input', key: 'width' },
+      height: { source: 'input', key: 'height' },
+    },
+    widget_order: ['prompt', 'width', 'height', 'length']
+  },
+  MiniMaxH3TextToVideo: {
+    category: 'SAMPLING', roles: ['SOURCE'],
+    inputs: {
+      clip: { type: 'CLIP' }, vae: { type: 'VAE' },
+      prompt: { type: 'STRING' }, width: { type: 'INT' }, height: { type: 'INT' }, length: { type: 'INT' },
+    },
+    outputs: { CONDITIONING: { type: 'CONDITIONING' }, LATENT: { type: 'LATENT' } },
+    param_mapping: {
+      prompt: { source: 'input', key: 'prompt' },
+      negativePrompt: { source: 'input', key: 'negative_prompt' },
+      width: { source: 'input', key: 'width' },
+      height: { source: 'input', key: 'height' },
+    },
+    widget_order: ['prompt', 'width', 'height', 'length']
+  },
+
   // Newer core node that patches the model and passes it through unchanged.
   CFGNorm: {
     category: 'TRANSFORM', roles: ['PASS_THROUGH'],

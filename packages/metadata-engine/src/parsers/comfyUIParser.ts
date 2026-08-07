@@ -614,7 +614,30 @@ function createNodeMap(workflow: any, prompt: any): Graph {
             const node = graph[id];
             if ((pNode as any).inputs) Object.assign(node.inputs, (pNode as any).inputs);
             if ((pNode as any).class_type) node.class_type = (pNode as any).class_type;
-            if ((pNode as any).widgets_values) node.widgets_values = (pNode as any).widgets_values;
+            if ((pNode as any).widgets_values) {
+                node.widgets_values = (pNode as any).widgets_values;
+            } else {
+                // Execution prompt carries its values in `inputs` (no widget list).
+                // Rebuild widgets_values from them so widget-index-based extraction
+                // sees what actually ran — the UI-template widget slots can be
+                // misaligned by subgraph widget propagation (e.g. a VAE name landing
+                // in a UNETLoader's slot 0). Holes are preserved to keep
+                // widget_order alignment (e.g. KSampler's "__unknown__" placeholder).
+                const nodeDef = NodeRegistry[node.class_type];
+                if (nodeDef?.widget_order && (pNode as any).inputs) {
+                    const rebuilt: any[] = [];
+                    let hasValue = false;
+                    for (let wi = 0; wi < nodeDef.widget_order.length; wi++) {
+                        const key = nodeDef.widget_order[wi];
+                        const value = (pNode as any).inputs[key];
+                        if (value !== undefined && !Array.isArray(value)) {
+                            rebuilt[wi] = value;
+                            hasValue = true;
+                        }
+                    }
+                    if (hasValue) node.widgets_values = rebuilt;
+                }
+            }
         }
     }
 
@@ -693,7 +716,7 @@ function findTerminalNode(graph: Graph): ParserNode | null {
             if (node.class_type === 'SaveImageWithMetaData') {
                 return node; // Highest priority
             }
-            
+
             // Prioritize KSampler variants and workflow sampler nodes
             if (node.class_type.includes('KSampler') || node.class_type.includes('Sampler') || node.class_type === 'FaceDetailer') {
               if (!kSamplerNode || node.class_type === 'KSampler (Efficient)') {
@@ -718,6 +741,10 @@ const TEXT_SOURCE_NODE_TYPES = new Set([
   'ShowText', 'String Literal', 'PrimitiveString', 'PrimitiveStringMultiline',
   'SimpleText', 'Text Concatenate', 'String Concatenate', 'DF_Text_Box',
   'String', 'ACE_TextGoogleTranslate',
+  // Video models that carry the prompt in an input (MiniMax H3 family) —
+  // the execution value in `inputs.prompt` must be preferred over the
+  // subgraph template default sitting in widgets_values.
+  'MiniMaxH3ImageToVideo', 'MiniMaxH3TextToVideo',
 ]);
 
 /**
@@ -729,6 +756,9 @@ const TEXT_INPUT_NAMES = new Set([
   'string1', 'string2', 'string3', 'string4',
   'a', 'b', 'c', 'd',
   'clip_l', 't5xxl',
+  // Execution prompt inputs (e.g. MiniMax H3 video nodes). These carry what
+  // actually ran — they must win over widget values (template defaults).
+  'prompt',
 ]);
 
 /**
