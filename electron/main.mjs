@@ -20,6 +20,7 @@ import { execFile, spawn } from "child_process";
 import { promisify } from "util";
 import * as fileWatcher from "./fileWatcher.mjs";
 import archiver from "archiver";
+import ffprobeStatic from "ffprobe-static";
 import { createRequire } from "module";
 
 const require = createRequire(import.meta.url);
@@ -140,19 +141,45 @@ const buildVideoInfoFromProbe = (stream, format) => {
       ? Number(format.duration)
       : format?.duration;
 
+  // ffprobe reports the *coded* width/height — the pixel grid as stored.
+  // Rotated videos (portrait phone/ComfyUI recordings are often 90/270°)
+  // keep the pre-rotation grid, so swap width/height for display purposes.
+  const rotationTag = Number(stream?.tags?.rotate ?? stream?.tags?.rotation);
+  const sideRotation = stream?.side_data_list?.find(
+    (entry) => typeof entry?.rotation === "number",
+  )?.rotation;
+  const rotation = Number.isFinite(rotationTag)
+    ? rotationTag
+    : Number.isFinite(sideRotation)
+      ? sideRotation
+      : 0;
+  const portrait = rotation % 180 === 90;
+  const codedWidth = typeof stream?.width === "number" ? stream.width : null;
+  const codedHeight = typeof stream?.height === "number" ? stream.height : null;
+
   return {
     frame_rate: Number.isFinite(frameRate) ? frameRate : null,
     frame_count: Number.isFinite(frameCount) ? frameCount : null,
     duration_seconds: Number.isFinite(durationValue) ? durationValue : null,
-    width: typeof stream?.width === "number" ? stream.width : null,
-    height: typeof stream?.height === "number" ? stream.height : null,
+    width:
+      portrait && codedWidth !== null && codedHeight !== null
+        ? codedHeight
+        : codedWidth,
+    height:
+      portrait && codedWidth !== null && codedHeight !== null
+        ? codedWidth
+        : codedHeight,
+    rotation,
     codec: stream?.codec_name || null,
     format: format?.format_name || null,
   };
 };
 
 async function readVideoMetadataWithFfprobe(filePath) {
-  const ffprobePath = process.env.FFPROBE_PATH || "ffprobe";
+  // Binary resolution order: explicit env override → the ffprobe bundled in
+  // node_modules (ffprobe-static) → PATH lookup for system installs. The
+  // bundled binary makes video probing work on machines without ffmpeg.
+  const ffprobePath = process.env.FFPROBE_PATH || ffprobeStatic.path || "ffprobe";
   const { stdout } = await execFileAsync(
     ffprobePath,
     [
@@ -179,6 +206,11 @@ async function readVideoMetadataWithFfprobe(filePath) {
     comment: tags.comment,
     description: tags.description,
     title: tags.title,
+    // ComfyUI save nodes embed the workflow/prompt as mdta-style tags;
+    // pass them through so the renderer can resolve generation metadata.
+    workflow: tags.workflow,
+    prompt: tags.prompt,
+    encoder: tags.encoder,
     video: buildVideoInfoFromProbe(videoStream, format),
   };
 }

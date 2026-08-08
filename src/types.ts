@@ -589,6 +589,7 @@ export interface VideoInfo {
   duration_seconds?: number | null;
   width?: number | null;
   height?: number | null;
+  rotation?: number | null;
   format?: string | null;
   codec?: string | null;
 }

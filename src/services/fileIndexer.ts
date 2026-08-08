@@ -167,6 +167,11 @@ async function readVideoMetadataFromElectron(
       description: result.description || '',
       comment: result.comment || '',
       title: result.title || '',
+      // ComfyUI embeds workflow/prompt as video tags — pass them through so
+      // the normal ComfyUI normalization below can resolve generation data.
+      workflow: result.workflow || '',
+      prompt: result.prompt || '',
+      encoder: result.encoder || '',
     };
 
     let metaHubData: Record<string, any> | null = null;
@@ -1345,10 +1350,16 @@ if (rawMetadata) {
     const normalizedFileType = inferredType ?? fallbackType;
     const normalizedFileSize = fileSizeValue ?? 0;
 
-    // Read actual image dimensions — use worker result if available,
-    // otherwise fall back to extracting from the (non-detached) buffer.
+    // Read actual image dimensions — ffprobe (videoInfo) is authoritative for
+    // videos, then worker result, then extracting from the (non-detached)
+    // buffer. ffprobe dims must win even when the ComfyUI mdta path already
+    // produced normalizedMetadata: for videos it knows rotation-aware
+    // display dimensions, which the tkhd fallback can't correct.
     const dimensionsStart = profile ? performance.now() : 0;
-    const dims = workerDims ?? (bufferForDimensions ? extractDimensionsFromBuffer(bufferForDimensions) : null);
+    const dims =
+      videoInfo?.width && videoInfo?.height
+        ? { width: videoInfo.width, height: videoInfo.height }
+        : workerDims ?? (bufferForDimensions ? extractDimensionsFromBuffer(bufferForDimensions) : null);
     if (dims) {
       if (!normalizedMetadata) {
           normalizedMetadata = {
@@ -1359,6 +1370,13 @@ if (rawMetadata) {
               steps: 0,
               scheduler: ''
           } as BaseMetadata;
+      } else if (videoInfo?.width && videoInfo?.height) {
+          // For videos, ffprobe's ACTUAL encoded dimensions are the
+          // authoritative file parameters — override generation-parameter
+          // dims (e.g. metahub) which can drift from the real encode after
+          // a resize/re-encode.
+          normalizedMetadata.width = dims.width;
+          normalizedMetadata.height = dims.height;
       } else {
           normalizedMetadata.width = normalizedMetadata.width || dims.width;
           normalizedMetadata.height = normalizedMetadata.height || dims.height;

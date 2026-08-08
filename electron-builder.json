@@ -11,6 +11,9 @@
     "public/SilkStack 1024.png",
     "public/SilkStack 512.png"
   ],
+  "asarUnpack": [
+    "**/node_modules/ffprobe-static/**"
+  ],
   "win": {
     "executableName": "SilkStack",
     "icon": "public/icon.ico",

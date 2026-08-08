@@ -745,6 +745,9 @@ const TEXT_SOURCE_NODE_TYPES = new Set([
   // the execution value in `inputs.prompt` must be preferred over the
   // subgraph template default sitting in widgets_values.
   'MiniMaxH3ImageToVideo', 'MiniMaxH3TextToVideo',
+  // LTX-Video: the LLM prompt generator feeds CLIPTextEncode via a link;
+  // its `prompt` input carries the actual text.
+  'TextGenerateLTX2Prompt',
 ]);
 
 /**

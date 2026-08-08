@@ -10,6 +10,9 @@
     "public/icon.ico",
     "public/logo1.png"
   ],
+  "asarUnpack": [
+    "**/node_modules/ffprobe-static/**"
+  ],
   "win": {
     "target": "dir"
   },
