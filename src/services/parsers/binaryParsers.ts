@@ -6,7 +6,7 @@
  * or DOM dependencies. Works exclusively with ArrayBuffer / DataView.
  */
 
-import { parse } from 'exifr';
+import exifr from 'exifr';
 import {
   type ImageMetadata,
   type ComfyUIMetadata,
@@ -607,7 +607,7 @@ export async function parsePNGMetadata(buffer: ArrayBuffer): Promise<ImageMetada
 export async function parseJPEGMetadata(buffer: ArrayBuffer): Promise<ImageMetadata | null> {
   try {
     // Extract EXIF data with UserComment and XMP support
-    const exifData = await parse(buffer, {
+    const exifData = await exifr.parse(buffer, {
       userComment: true,
       xmp: true,
       mergeOutput: true,
@@ -1224,7 +1224,7 @@ export async function parseWebPMetadata(buffer: ArrayBuffer): Promise<ImageMetad
 
     // Parse the EXIF data with exifr (coerce to Uint8Array first — exifr's
     // instanceof checks fail across realms, e.g. Node Buffer vs jsdom/worker).
-    const exifData = await parse(new Uint8Array(exifChunkData), {
+    const exifData = await exifr.parse(new Uint8Array(exifChunkData), {
       userComment: true,
       xmp: true,
       mergeOutput: true,

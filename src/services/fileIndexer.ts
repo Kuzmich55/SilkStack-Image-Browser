@@ -3,7 +3,7 @@
 import { IncrementalCacheWriter, type CacheImageMetadata } from './cacheManager';
 
 import { type IndexedImage, type ImageMetadata, type BaseMetadata, type VideoMetadata, type VideoInfo, isInvokeAIMetadata, isAutomatic1111Metadata, isComfyUIMetadata, isSwarmUIMetadata, isEasyDiffusionMetadata, isEasyDiffusionJson, isMidjourneyMetadata, isNijiMetadata, isForgeMetadata, isDalleMetadata, isFireflyMetadata, isDreamStudioMetadata, isDrawThingsMetadata, ComfyUIMetadata, InvokeAIMetadata, SwarmUIMetadata, EasyDiffusionMetadata, EasyDiffusionJson, MidjourneyMetadata, NijiMetadata, ForgeMetadata, DalleMetadata, FireflyMetadata, DrawThingsMetadata, FooocusMetadata } from '../types';
-import { parse } from 'exifr';
+import exifr from 'exifr';
 import { resolvePromptFromGraph, parseComfyUIMetadataEnhanced } from './parsers/comfyUIParser';
 import { parseVideoMetaHubMetadata } from './parsers/videoMetaHubParser';
 import { parseInvokeAIMetadata } from './parsers/invokeAIParser';
@@ -526,7 +526,7 @@ async function parsePNGMetadata(buffer: ArrayBuffer): Promise<ImageMetadata | nu
 async function parseJPEGMetadata(buffer: ArrayBuffer): Promise<ImageMetadata | null> {
   try {
     // Extract EXIF data with UserComment and XMP support
-    const exifData = await parse(buffer, {
+    const exifData = await exifr.parse(buffer, {
       userComment: true,
       xmp: true,
       mergeOutput: true,

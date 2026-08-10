@@ -2,6 +2,43 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.0] - 2026-08-10
+
+### Video Metadata Support
+
+- Bundled ffprobe for MP4 probing — video metadata works without ffmpeg/ffprobe on PATH
+- Rotation-aware video dimensions (portrait phone recordings display correctly)
+- ComfyUI MP4 (mdta) metadata extraction — videos show full generation parameters like images
+- Pure byte-level mdta parser fallback for machines where the bundled probe can't run
+
+### Expanded Format Support
+
+- TIFF metadata extraction (IFD walker reads Make/Model tags, incl. ComfyUI SaveWebP metadata)
+- WebP parsing no longer fails when exifr errors — ComfyUI WebP metadata read from TIFF bytes directly
+
+### ComfyUI Parser Expansion
+
+- Qwen-Image / Qwen-Image-Edit text encoder support
+- MiniMax H3 video models (text-to-video, first/last-frame image-to-video)
+- LTXV video model family — schedulers, conditioning, latent upsampling, audio latents, video VAEs
+- Additional nodes: CreateVideo, SaveVideo, EmptyImage, GetImageSize, PrimitiveInt/Float, ManualSigmas, VAELoaderKJ, LatentUpscaleModelLoader, CFGNorm, and more
+- Improved subgraph traversal for prompt and parameter resolution
+
+### Model View
+
+- Images without model metadata now grouped under a filterable **(no model)** entry
+
+### Clipboard & Context Menu
+
+- **Copy Image** re-encodes non-PNG formats (e.g. JPEG) to PNG on the fly — clipboard copy now works for every format
+- Right-click context menus work from stack cards and expanded stack views
+- Layered Escape: with the context menu open, Escape closes only the menu; a second Escape closes the stack view
+
+### Bug Fixes & Polish
+
+- License tab errors no longer break the production packaging build
+- Format-aware file parameter display for video files in the image modal
+
 ## [2.0.0] - 2026-08-03
 
 _Release notes to be added._
