@@ -42,6 +42,7 @@ Significant upgrades to workflow parsing, bringing support for the latest genera
 - **Right-click from stacks** — Context menus (rename, copy, delete, etc.) now work correctly when opened from a stack card or the stack view.
 - **Layered Escape** — With the context menu open, Escape closes only the menu; a second Escape closes the stack view. Previously one press closed both at once.
 - **License tab errors fixed** — The license-compliance build step no longer errors during production packaging.
+- **SilkStack-cli fixed** — The CLI crashed on startup under modern Node (exifr's named export isn't resolvable from its CJS build); it launches and prints help again.
 - **Format-aware file parameters** — Image parameter display handles video files and edge cases correctly in the image modal.
 
 ## Feedback
