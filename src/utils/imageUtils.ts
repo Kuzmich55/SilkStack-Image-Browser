@@ -8,15 +8,47 @@ export interface OperationResult {
 }
 
 /**
- * Copies an image to the clipboard using the Clipboard API
+ * Copies an image to the clipboard using the Clipboard API.
+ *
+ * Chromium (Electron) only accepts `image/png` (and `image/webp`) for
+ * `ClipboardItem` writes — `image/jpeg` is rejected with "Type Image/jpeg
+ * not supported on write". Files in any other image format are therefore
+ * re-encoded to PNG via a canvas before being written.
  * @param image - The IndexedImage object containing the file handle
  * @returns Promise with operation result
  */
 export const copyImageToClipboard = async (image: IndexedImage): Promise<OperationResult> => {
   try {
     const file = await image.handle.getFile();
-    const blob = new Blob([file], { type: file.type });
-    await navigator.clipboard.write([new ClipboardItem({ [file.type]: blob })]);
+
+    // PNG and WebP are natively writable — no re-encoding needed.
+    if (file.type === 'image/png' || file.type === 'image/webp') {
+      const blob = new Blob([file], { type: file.type });
+      await navigator.clipboard.write([new ClipboardItem({ [file.type]: blob })]);
+      return { success: true };
+    }
+
+    if (!file.type.startsWith('image/')) {
+      return { success: false, error: 'Only image files can be copied to the clipboard.' };
+    }
+
+    // Re-encode to PNG — the format Chromium always supports on clipboard writes.
+    const bitmap = await createImageBitmap(file);
+    const canvas = document.createElement('canvas');
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      return { success: false, error: 'Failed to prepare image for clipboard.' };
+    }
+    ctx.drawImage(bitmap, 0, 0);
+    const pngBlob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, 'image/png')
+    );
+    if (!pngBlob) {
+      return { success: false, error: 'Failed to encode image as PNG.' };
+    }
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]);
     return { success: true };
   } catch (error) {
     console.error('Failed to copy image to clipboard:', error);

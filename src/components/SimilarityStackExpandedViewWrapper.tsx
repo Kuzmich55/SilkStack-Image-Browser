@@ -15,6 +15,8 @@ interface SimilarityStackExpandedViewWrapperProps {
   selectedImages: Set<string>;
   onBack: () => void;
   imageSize?: number;
+  /** Right-click handler — receives the right-clicked image in the drill-down view. */
+  onContextMenu?: (image: IndexedImage, event: React.MouseEvent) => void;
 }
 
 // ── Thumbnail preloader ────────────────────────────────────────────────
@@ -70,6 +72,7 @@ const SimilarityStackExpandedViewWrapper: React.FC<SimilarityStackExpandedViewWr
   selectedImages,
   onBack,
   imageSize: imageSizeProp,
+  onContextMenu,
 }) => {
   const aiFeaturesEnabled = useAiFeaturesEnabled();
   const libraryImageSize = useSettingsStore(s => s.viewZoomLevels.library);
@@ -253,6 +256,7 @@ const SimilarityStackExpandedViewWrapper: React.FC<SimilarityStackExpandedViewWr
         onToggleSelection={handleToggleSelection}
         onDragStart={handleDragStart as any}
         onDragEnd={handleDragEnd}
+        onContextMenu={onContextMenu as any}
       />
     </>
   );

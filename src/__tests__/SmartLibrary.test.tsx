@@ -23,18 +23,32 @@ import { computeLicenseStamp } from '../services/aiFeatureAccess';
 // These are loaded via React.lazy, so the test must use waitFor/findBy*
 // to allow the Suspense boundary to resolve.
 vi.mock('@ai-images-browser/ai-intelligence', () => {
-  const MockStackCard = ({ stack, onOpen }: any) => (
-    <button onClick={onOpen} type="button">
+  const MockStackCard = ({ stack, onOpen, onContextMenu }: any) => (
+    <button
+      onClick={onOpen}
+      onContextMenu={(e: any) => onContextMenu && onContextMenu(stack.coverImage, e)}
+      type="button"
+    >
       <span>{stack.count} images</span>
     </button>
   );
-  const MockSimilarityStackExpandedView = ({ onBack, images, subGroups }: any) => (
+  const MockSimilarityStackExpandedView = ({ onBack, images, subGroups, onContextMenu }: any) => (
     <div>
       <button onClick={onBack} type="button">
         Library
       </button>
       <span>{images.length} images</span>
       <span>{subGroups.length} prompt variations</span>
+      {/* One card per image, mirroring the real SubGroupImageCard's right-click */}
+      {images.map((img: any) => (
+        <div
+          key={img.id}
+          data-testid={`expanded-card-${img.id}`}
+          onContextMenu={(e: any) => onContextMenu && onContextMenu(img, e)}
+        >
+          {img.id}
+        </div>
+      ))}
     </div>
   );
   return {
@@ -106,5 +120,45 @@ describe('Stacks Scroll Position and DOM Preservation', () => {
 
     // Footer should still be visible
     expect(container.querySelector('footer')).not.toBeNull();
+  });
+
+  it('opens the right-click context menu on images inside the expanded stack view', async () => {
+    // Same store setup as the test above — two images grouped into one stack.
+    const mockImages = [
+      { id: '1', prompt: 'test prompt A', directoryId: 'dir1', lastModified: 1000, stackGroupId: 'hash-a', metadata: {} },
+      { id: '2', prompt: 'test prompt A', directoryId: 'dir1', lastModified: 900, stackGroupId: 'hash-a', metadata: {} },
+    ] as any;
+
+    useImageStore.setState({
+      filteredImages: mockImages,
+      directories: [{ id: 'dir1', path: 'C:/test' }] as any,
+      scanSubfolders: false,
+    });
+
+    useSettingsStore.setState({
+      licenseStatus: 'valid',
+      licenseKey: 'TEST-KEY',
+      licenseLastValidated: Date.now(),
+      licenseStamp: computeLicenseStamp('TEST-KEY', 'valid', Date.now()),
+    });
+
+    const { container } = render(<Stacks />);
+
+    // Open the stack drill-down view
+    const openBtn = await screen.findByText(/images/i);
+    fireEvent.click(openBtn);
+
+    // Right-click an image card inside the expanded view
+    const expandedCard = await screen.findByTestId('expanded-card-1');
+    fireEvent.contextMenu(expandedCard);
+
+    // Context menu should be visible with the standard actions
+    const menu = container.querySelector('.context-menu-class');
+    expect(menu).not.toBeNull();
+    expect(screen.getByText('Copy to Clipboard')).toBeDefined();
+
+    // Clicking outside the menu closes it
+    fireEvent.click(document.body);
+    expect(container.querySelector('.context-menu-class')).toBeNull();
   });
 });

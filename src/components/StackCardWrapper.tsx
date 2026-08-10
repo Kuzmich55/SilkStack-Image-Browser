@@ -7,6 +7,8 @@ import { useAiFeaturesEnabled } from '../services/aiFeatureAccess';
 interface StackCardWrapperProps {
   stack: ImageStack;
   onOpen: () => void;
+  /** Right-click handler — receives the stack card's cover (or hovered preview) image. */
+  onContextMenu?: (image: IndexedImage, event: React.MouseEvent) => void;
 }
 
 // Lazy-load the package StackCard when AI features are available.
@@ -40,7 +42,7 @@ const ThumbnailPreloader: React.FC<{ image: IndexedImage | null }> = ({ image })
  *
  * Keep in sync with the package's StackCardProps interface.
  */
-const StackCardWrapper: React.FC<StackCardWrapperProps> = ({ stack, onOpen }) => {
+const StackCardWrapper: React.FC<StackCardWrapperProps> = ({ stack, onOpen, onContextMenu }) => {
   // Trigger thumbnail loading for every image in the stack.
   // StackCard's hover scrubber switches between images[previewIndex]
   // thumbnails — all of them must be available for smooth scrubbing.
@@ -57,7 +59,7 @@ const StackCardWrapper: React.FC<StackCardWrapperProps> = ({ stack, onOpen }) =>
       {images.map((img) => (
         <ThumbnailPreloader key={img.id} image={img} />
       ))}
-      <Inner stack={stack as any} onOpen={onOpen} />
+      <Inner stack={stack as any} onOpen={onOpen} onContextMenu={onContextMenu as any} />
     </>
   );
 };

@@ -4,8 +4,9 @@ import { useSettingsStore } from './store/useSettingsStore';
 import { useImageLoader } from './hooks/useImageLoader';
 import { useImageSelection } from './hooks/useImageSelection';
 import { useHotkeys } from './hooks/useHotkeys';
-import { Directory } from './types';
-import { X, ArrowLeft } from 'lucide-react';
+import { useContextMenu } from './hooks/useContextMenu';
+import { Directory, IndexedImage } from './types';
+import { X, ArrowLeft, Copy, ExternalLink, Folder } from 'lucide-react';
 
 import FolderSelector from './components/FolderSelector';
 import ImageGrid from './components/ImageGrid';
@@ -59,6 +60,27 @@ export default function App() {
   const selectedImage = useImageStore((state) => state.selectedImage);
   const previewImage = useImageStore((state) => state.previewImage);
   const clustersCount = useImageStore((state) => state.clusters.length);
+
+  // Right-click context menu — same hook + menu as the grid/table/stacks view.
+  // Covers the library tab's stack drill-down (SimilarityStackExpandedView).
+  const {
+    contextMenu,
+    showContextMenu,
+    hideContextMenu,
+    copyPrompt,
+    copyNegativePrompt,
+    copySeed,
+    copyImage,
+    copyModel,
+    showInFolder,
+    openWithNativeViewer,
+    copyRawMetadata
+  } = useContextMenu();
+
+  const handleContextMenu = useCallback((image: IndexedImage, e: React.MouseEvent) => {
+    const directoryPath = directories.find(d => d.id === image.directoryId)?.path;
+    showContextMenu(e, image, directoryPath);
+  }, [directories, showContextMenu]);
 
   // Loading & progress selectors
   const indexingState = useImageStore((state) => state.indexingState);
@@ -1039,6 +1061,7 @@ export default function App() {
                             setStackingEnabled(true);
                             setLibraryStackContext(null);
                           }}
+                          onContextMenu={handleContextMenu}
                         />
                       ) : viewMode === 'grid' ? (
                         <ImageGrid
@@ -1174,6 +1197,86 @@ export default function App() {
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
       />
+
+      {/* Right-click context menu (same as the library grid/table/stacks view) */}
+      {contextMenu.visible && (
+        <div
+          className="fixed z-[60] bg-gray-800 border border-gray-600 rounded-lg shadow-xl py-1 min-w-[160px] context-menu-class"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+        >
+          <button
+            onClick={copyImage}
+            className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition-colors flex items-center gap-2"
+          >
+            <Copy className="w-4 h-4" />
+            Copy to Clipboard
+          </button>
+
+          <div className="border-t border-gray-600 my-1"></div>
+
+          <button
+            onClick={copyPrompt}
+            className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition-colors flex items-center gap-2"
+            disabled={!contextMenu.image?.prompt && !(contextMenu.image?.metadata as any)?.prompt}
+          >
+            <Copy className="w-4 h-4" />
+            Copy Prompt
+          </button>
+          <button
+            onClick={copyNegativePrompt}
+            className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition-colors flex items-center gap-2"
+            disabled={!contextMenu.image?.negativePrompt && !(contextMenu.image?.metadata as any)?.negativePrompt}
+          >
+            <Copy className="w-4 h-4" />
+            Copy Negative Prompt
+          </button>
+          <button
+            onClick={copySeed}
+            className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition-colors flex items-center gap-2"
+            disabled={!contextMenu.image?.seed && !(contextMenu.image?.metadata as any)?.seed}
+          >
+            <Copy className="w-4 h-4" />
+            Copy Seed
+          </button>
+          <button
+            onClick={copyModel}
+            className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition-colors flex items-center gap-2"
+            disabled={!contextMenu.image?.models?.[0] && !(contextMenu.image?.metadata as any)?.model}
+          >
+            <Copy className="w-4 h-4" />
+            Copy Model
+          </button>
+
+          <div className="border-t border-gray-600 my-1"></div>
+
+          <button
+            onClick={copyRawMetadata}
+            className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition-colors flex items-center gap-2"
+            disabled={!contextMenu.image?.metadata}
+          >
+            <Copy className="w-4 h-4" />
+            Copy Raw Metadata
+          </button>
+
+          <div className="border-t border-gray-600 my-1"></div>
+
+          <button
+            onClick={openWithNativeViewer}
+            className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition-colors flex items-center gap-2"
+          >
+            <ExternalLink className="w-4 h-4" />
+            Open in Native Viewer
+          </button>
+
+          <button
+            onClick={showInFolder}
+            className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition-colors flex items-center gap-2"
+          >
+            <Folder className="w-4 h-4" />
+            Show in Folder
+          </button>
+        </div>
+      )}
     </div>
   );
 }
