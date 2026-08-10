@@ -44,9 +44,24 @@ export const useContextMenu = () => {
       }
     };
 
+    // Close on Escape too. The handler is shared by every view that mounts
+    // the hook, so it must only intercept the press while THIS menu is
+    // actually visible — otherwise stopPropagation would swallow Escape for
+    // window-level handlers (e.g. App's stack-view close) even when no menu
+    // is open. Esc closes the menu first; a subsequent Esc (menu closed)
+    // passes through and closes the stack.
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (contextMenu.visible && event.key === 'Escape') {
+        event.stopPropagation();
+        hideContextMenu();
+      }
+    };
+
     document.addEventListener('click', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
     return () => {
       document.removeEventListener('click', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
     };
   }, [contextMenu.visible, hideContextMenu]);
 

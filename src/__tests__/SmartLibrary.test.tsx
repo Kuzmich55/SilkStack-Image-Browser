@@ -157,7 +157,24 @@ describe('Stacks Scroll Position and DOM Preservation', () => {
     expect(menu).not.toBeNull();
     expect(screen.getByText('Copy to Clipboard')).toBeDefined();
 
-    // Clicking outside the menu closes it
+    // Escape closes ONLY the menu — a window-level Escape handler (like
+    // App's stack-view close) must not fire while the menu is open.
+    let windowEscCount = 0;
+    const escSpy = () => { windowEscCount++; };
+    window.addEventListener('keydown', escSpy);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(container.querySelector('.context-menu-class')).toBeNull();
+    expect(windowEscCount).toBe(0);
+
+    // With the menu closed, Escape passes through to window-level handlers
+    // (App's stack-view close) — nothing may swallow it.
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(windowEscCount).toBe(1);
+    window.removeEventListener('keydown', escSpy);
+
+    // Re-open, then clicking outside the menu also closes it
+    fireEvent.contextMenu(expandedCard);
+    expect(container.querySelector('.context-menu-class')).not.toBeNull();
     fireEvent.click(document.body);
     expect(container.querySelector('.context-menu-class')).toBeNull();
   });

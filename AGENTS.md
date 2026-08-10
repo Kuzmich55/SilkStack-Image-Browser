@@ -13,6 +13,8 @@ When working on this codebase:
 - Keep privacy-first approach (no external connections)
 - Follow TypeScript best practices
 - Write tests for new functionality
+- Do not auto commit to git
+- Do not run deploy scripts automatically
 
 ### Code Style
 
