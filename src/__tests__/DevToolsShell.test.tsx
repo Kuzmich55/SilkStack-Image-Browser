@@ -9,6 +9,9 @@ vi.mock('../components/DevAutoTaggingTester', () => ({
 vi.mock('../components/DevSemanticSearchTester', () => ({
   default: () => <div>Semantic search tester</div>,
 }));
+vi.mock('../components/DevVectorSimilarityTester', () => ({
+  default: () => <div>Vector similarity tester</div>,
+}));
 
 import DevToolsShell from '../components/DevToolsShell';
 
@@ -43,5 +46,34 @@ describe('DevToolsShell', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Auto-Tag' }));
     expect(autoTag.style.display).not.toBe('none');
     expect(semantic.style.display).toBe('none');
+  });
+
+  it('opens the Vector Similarity tool and mounts it lazily (not the default)', () => {
+    render(<DevToolsShell initialTool="vector-similarity" />);
+    const vector = screen.getByTestId('pane-vector-similarity');
+    expect(vector).toBeTruthy();
+    expect(vector.style.display).not.toBe('none');
+    // Lazy mount: the default tool is not mounted just because it exists.
+    expect(screen.queryByTestId('pane-semantic-search')).toBeNull();
+  });
+
+  it('keeps all three panes alive across tab switches', () => {
+    render(<DevToolsShell initialTool="semantic-search" />);
+    const semantic = screen.getByTestId('pane-semantic-search');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Vector Similarity' }));
+    const vector = screen.getByTestId('pane-vector-similarity');
+    expect(vector.style.display).not.toBe('none');
+    expect(semantic.style.display).toBe('none');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Auto-Tag' }));
+    const autoTag = screen.getByTestId('pane-auto-tag');
+    expect(autoTag.style.display).not.toBe('none');
+    expect(vector.style.display).toBe('none');
+
+    // Back to Semantic Search — still mounted (state preserved), re-shown.
+    fireEvent.click(screen.getByRole('button', { name: 'Semantic Search' }));
+    expect(semantic.style.display).not.toBe('none');
+    expect(autoTag.style.display).toBe('none');
   });
 });

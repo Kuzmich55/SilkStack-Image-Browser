@@ -249,7 +249,11 @@ export default function App() {
     if (!import.meta.env.VITE_AI_FEATURES_AVAILABLE) return;
 
     (window as any).resetStacking = async () => {
-      const openReq = indexedDB.open('image-metahub-preferences', 7);
+      // No version argument on purpose: this helper never upgrades — it only
+      // maintains imageAnnotations. A version BELOW the current one throws
+      // VersionError (the DB is v9 as of the prompt-vector stores), and a
+      // version above would trigger an upgrade this helper must not own.
+      const openReq = indexedDB.open('image-metahub-preferences');
       const db: IDBDatabase = await new Promise((resolve, reject) => {
         openReq.onsuccess = () => resolve(openReq.result);
         openReq.onerror = () => reject(openReq.error);

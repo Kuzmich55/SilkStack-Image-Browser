@@ -123,6 +123,13 @@ export interface PromptEmbedResult {
   skipped: number;
 }
 
+/** One ranked hit from searchPromptVectors (the prompt-vector search). */
+export interface PromptVectorSearchHit {
+  imageId: string;
+  score: number;
+  promptHash: string;
+}
+
 /** Persisted prompt-vector record (mirror of PromptVectorRecord). */
 export interface PromptVectorRecord {
   imageId: string;
@@ -199,6 +206,13 @@ interface ModuleCoordinator {
   getPromptSimilarityGroups(): Promise<PromptSimilarityGroupRecord[]>;
   /** Vector clustering over prompt groups (chunked, rep-persisting). */
   clusterPromptGroups(input: PromptGroupClusteringRequest): Promise<PromptGroupClusteringResult>;
+  /** Public embed round-trip (dev-tester prompt comparison) — no persistence. */
+  embedTexts(texts: string[]): Promise<Float32Array[]>;
+  /** Cosine-rank the active DB's prompt vectors against a query (dev-tester search). */
+  searchPromptVectors(
+    query: string,
+    options?: { limit?: number; minScore?: number },
+  ): Promise<PromptVectorSearchHit[]>;
   /** Delete images from the vector stores + worker index (deletion hook). */
   removeImages(imageIds: string[]): Promise<void>;
   dispose(): void;
@@ -396,6 +410,26 @@ export class SemanticSearchCoordinator {
    */
   embedPromptVectors(entries: PromptVectorEmbedEntry[]): Promise<PromptEmbedResult> {
     return this.withModule((coordinator) => coordinator.embedPromptVectors(entries));
+  }
+
+  /**
+   * Public embed round-trip for the dev tester's prompt comparison — nothing
+   * is persisted and text is embedded as given (the tester normalizes prompt
+   * text first, matching the store's records). `[]` when the module is absent.
+   */
+  embedTexts(texts: string[]): Promise<Float32Array[]> {
+    return this.withModule((coordinator) => coordinator.embedTexts(texts));
+  }
+
+  /**
+   * Rank the active DB's stored prompt vectors against a prompt-like query
+   * (dev-tester search over what the app's pipeline persisted). Read-only.
+   */
+  searchPromptVectors(
+    query: string,
+    options?: { limit?: number; minScore?: number },
+  ): Promise<PromptVectorSearchHit[]> {
+    return this.withModule((coordinator) => coordinator.searchPromptVectors(query, options));
   }
 
   /** Prompt vectors for the given imageIds (order-preserving, missing skipped). */

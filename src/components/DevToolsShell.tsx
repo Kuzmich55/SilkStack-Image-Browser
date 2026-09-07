@@ -1,6 +1,7 @@
 import { useState, type ComponentType } from 'react';
 import DevAutoTaggingTester from './DevAutoTaggingTester';
 import DevSemanticSearchTester from './DevSemanticSearchTester';
+import DevVectorSimilarityTester from './DevVectorSimilarityTester';
 
 /**
  * Every tool available in the dev-tools window. The `id` doubles as the
@@ -15,6 +16,7 @@ interface DevToolDef {
 
 const DEV_TOOLS: DevToolDef[] = [
   { id: 'semantic-search', label: 'Semantic Search', Component: DevSemanticSearchTester },
+  { id: 'vector-similarity', label: 'Vector Similarity', Component: DevVectorSimilarityTester },
   { id: 'auto-tag', label: 'Auto-Tag', Component: DevAutoTaggingTester },
 ];
 
