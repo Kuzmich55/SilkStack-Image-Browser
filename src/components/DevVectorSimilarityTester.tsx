@@ -48,6 +48,14 @@ const COMPARE_PRESETS = [
   },
 ];
 
+/**
+ * The pre-vector grouping engine merged prompts when hybridSimilarity
+ * (0.6·jaccard + 0.4·Levenshtein) ≥ 0.85 — the same 0.85 the vector engine
+ * defaults to (stacking-similarity.ts: "union-find, 0.85 threshold"). Fixed:
+ * the lexical engine had no cross-lingual relaxation.
+ */
+const LEXICAL_MATCH_THRESHOLD = 0.85;
+
 /** Full-res file reads for previews are expensive — cap how many hits get one. */
 const MAX_RESULT_PREVIEWS = 50;
 
@@ -151,6 +159,14 @@ interface VectorModuleConsts {
   generatePromptHash: (prompt: string) => string;
   /** Dot product over L2-normalized vectors (the module's similarity). */
   cosineSimilarity: (a: Float32Array, b: Float32Array) => number;
+  /**
+   * The pre-vector grouping engine's hybrid score (0.6·jaccard + 0.4·
+   * normalized Levenshtein — the app's retired lexical metric, still
+   * exported). null only when the export is absent; the UI hides the
+   * lexical line then rather than reimplementing MPL-covered logic
+   * app-side.
+   */
+  hybridSimilarity: ((a: string, b: string) => number) | null;
 }
 
 /** One file entry from listDirectoryFiles (recursive: name = subfolder-relative path). */
@@ -170,12 +186,24 @@ interface CompareResult {
   effThreshold: number;
   /** True when the cross-lingual relaxation was applied. */
   crosslingual: boolean;
+  /**
+   * The alternate non-AI score: the pre-vector grouping engine's hybrid
+   * (0.6·jaccard + 0.4·Levenshtein) over the same normalized text — judged
+   * against the fixed LEXICAL_MATCH_THRESHOLD. null when the module export
+   * is absent (line hidden, never reimplemented app-side).
+   */
+  lexicalScore: number | null;
   elapsed: number;
 }
 
 interface SearchResult {
   q: string;
-  hits: PromptVectorSearchHit[];
+  /**
+   * Vector-ranked hits, each carrying the alternate non-AI (lexical hybrid)
+   * score against the query — null when the corpus scan has not seen the
+   * hit's prompt text (the line is hidden then).
+   */
+  hits: Array<PromptVectorSearchHit & { lexicalScore: number | null }>;
   elapsed: number;
 }
 
@@ -449,6 +477,7 @@ export default function DevVectorSimilarityTester() {
               normalizePrompt: mod.normalizePrompt ?? FALLBACK_NORMALIZE,
               generatePromptHash: mod.generatePromptHash ?? FALLBACK_HASH,
               cosineSimilarity: mod.cosineSimilarity ?? FALLBACK_COSINE,
+              hybridSimilarity: mod.hybridSimilarity ?? null,
             };
           }
         } catch {
@@ -547,6 +576,10 @@ export default function DevVectorSimilarityTester() {
       }
       const cosine = stash?.cosineSimilarity ?? FALLBACK_COSINE;
       const score = cosine(va, vb);
+      // Alternate, non-AI score over the SAME normalized text: the retired
+      // pre-vector engine's hybrid (jaccard + Levenshtein), judged against
+      // its own fixed 0.85 — the comparison the vector engine replaced.
+      const lexicalScore = stash?.hybridSimilarity ? stash.hybridSimilarity(a, b) : null;
       const resolve = stash?.resolvePromptGroupingThreshold ?? FALLBACK_RESOLVE_THRESHOLD;
       const thresholdUsed = resolve(status?.modelId);
       const nonLatinRe = stash?.NON_LATIN_SCRIPT_RE ?? FALLBACK_NON_LATIN_RE;
@@ -558,10 +591,11 @@ export default function DevVectorSimilarityTester() {
         score,
         effThreshold: Math.max(0, thresholdUsed - delta),
         crosslingual,
+        lexicalScore,
         elapsed: Math.round(performance.now() - start),
       });
       appendLog(
-        `compare: ${(score * 100).toFixed(1)}% similar (${crosslingual ? 'cross-lingual — ' : ''}threshold ${thresholdUsed.toFixed(2)}${crosslingual ? ` − ${delta} delta` : ''})`,
+        `compare: ${(score * 100).toFixed(1)}% similar (${crosslingual ? 'cross-lingual — ' : ''}threshold ${thresholdUsed.toFixed(2)}${crosslingual ? ` − ${delta} delta` : ''}${lexicalScore !== null ? ` · lexical ${(lexicalScore * 100).toFixed(1)}%` : ''})`,
       );
     } catch (err) {
       setError(`Compare failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -653,7 +687,13 @@ export default function DevVectorSimilarityTester() {
             const id = `${dirPath}::${file.name}`;
             const metaResult = metas[i];
             const meta = metaResult.status === 'fulfilled' ? metaResult.value : null;
-            const rawPrompt = meta?.prompt;
+            // Crash-proof like the module's normalizePrompt: these are RAW
+            // metadata parsers, so a ComfyUI chunk's "prompt" can parse to a
+            // node ARRAY, not a string. The app treats non-string prompts as
+            // absent everywhere downstream (the module drops them at
+            // normalize) — guard here so one exotic file cannot fail the
+            // whole scan.
+            const rawPrompt = typeof meta?.prompt === 'string' ? meta.prompt : null;
             if (rawPrompt && rawPrompt.trim().length > 0) {
               const prompt = rawPrompt.trim();
               prompted.push({ id, prompt });
@@ -808,8 +848,20 @@ export default function DevVectorSimilarityTester() {
         options.minScore = Math.min(1, Math.max(0, floor));
       }
       const hits = await coordinator.searchPromptVectors(q, options);
-      setResult({ q, hits, elapsed: Math.round(performance.now() - start) });
-      void loadThumbnails(hits, seq); // fire-and-forget; seq guard drops late responses
+      // Non-AI alternate per hit: the pre-vector engine's hybrid between the
+      // query and the hit's STORED prompt text, resolved through the corpus
+      // scan's hash map (id-shape independent). A hit whose prompt the scan
+      // has never seen gets null → the row shows no lexical line.
+      const stash = moduleRef.current;
+      const normalize = stash?.normalizePrompt ?? FALLBACK_NORMALIZE;
+      const hybrid = stash?.hybridSimilarity;
+      const qText = normalize(q);
+      const hitsWithLexical = hits.map((h) => {
+        const text = promptByHashRef.current.get(h.promptHash) ?? promptByIdRef.current.get(h.imageId);
+        return { ...h, lexicalScore: hybrid && text ? hybrid(qText, normalize(text)) : null };
+      });
+      setResult({ q, hits: hitsWithLexical, elapsed: Math.round(performance.now() - start) });
+      void loadThumbnails(hitsWithLexical, seq); // fire-and-forget; seq guard drops late responses
       appendLog(
         `prompt-vector search: ${hits.length} hit(s) in ${Math.round(performance.now() - start)}ms` +
           (options.minScore !== undefined ? ` (minScore ${options.minScore.toFixed(2)})` : ''),
@@ -850,6 +902,16 @@ export default function DevVectorSimilarityTester() {
     moduleRef.current?.resolvePromptGroupingThreshold(status?.modelId ?? undefined) ?? 0.85;
   const crosslingualDelta = moduleRef.current?.PROMPT_GROUPING_CROSSLINGUAL_DELTA ?? 0.05;
   const promptCount = libraryImagesRef.current.length;
+  /**
+   * Verdict agreement between the AI (vector) and non-AI (lexical) methods
+   * on the last comparison — divergence is the signal this tool exists for,
+   * so it is highlighted rather than buried.
+   */
+  const compareAgree =
+    compareResult === null ||
+    compareResult.lexicalScore === null ||
+    (compareResult.score >= compareResult.effThreshold) ===
+      (compareResult.lexicalScore >= LEXICAL_MATCH_THRESHOLD);
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-gray-950 text-gray-200 font-sans">
@@ -1017,8 +1079,10 @@ export default function DevVectorSimilarityTester() {
               )}
             </div>
             {compareResult && (
-              <div className="mt-4 p-3 rounded-lg bg-gray-950/70 border border-gray-800 text-xs">
-                <div className="flex items-baseline gap-3">
+              <div className="mt-4 p-3 rounded-lg bg-gray-950/70 border border-gray-800 text-xs space-y-1.5">
+                {/* Row 1: the AI score vs the model's (possibly relaxed) threshold */}
+                <div className="flex items-baseline gap-2">
+                  <span className="text-gray-500 shrink-0 w-28">vector (AI)</span>
                   <span
                     className={`font-mono text-lg font-semibold ${
                       compareResult.score >= compareResult.effThreshold
@@ -1053,7 +1117,53 @@ export default function DevVectorSimilarityTester() {
                     )}
                   </span>
                 </div>
-                <div className="mt-1 text-gray-500 font-mono truncate" title={compareResult.a}>
+
+                {/* Row 2: the alternate non-AI score — the retired lexical
+                    grouping engine's own metric (0.6·jaccard + 0.4·
+                    Levenshtein) over the same normalized text, judged against
+                    its fixed 0.85 (no cross-lingual relaxation existed). */}
+                {compareResult.lexicalScore !== null && (
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-gray-500 shrink-0 w-28">lexical (non-AI)</span>
+                    <span
+                      className={`font-mono text-lg font-semibold ${
+                        compareResult.lexicalScore >= LEXICAL_MATCH_THRESHOLD
+                          ? 'text-green-400'
+                          : 'text-gray-300'
+                      }`}
+                    >
+                      {(compareResult.lexicalScore * 100).toFixed(1)}%
+                    </span>
+                    <span className="text-gray-400">
+                      {compareResult.lexicalScore >= LEXICAL_MATCH_THRESHOLD ? (
+                        <>
+                          ≥{' '}
+                          <span className="font-mono text-gray-300">
+                            {LEXICAL_MATCH_THRESHOLD.toFixed(2)}
+                          </span>{' '}
+                          — <span className="text-green-400">would merge (pre-vector engine)</span>
+                        </>
+                      ) : (
+                        <>
+                          &lt;{' '}
+                          <span className="font-mono text-gray-300">
+                            {LEXICAL_MATCH_THRESHOLD.toFixed(2)}
+                          </span>{' '}
+                          — distinct stacks
+                        </>
+                      )}
+                    </span>
+                  </div>
+                )}
+
+                {/* Divergence between the two methods is what threshold tuning is about */}
+                {!compareAgree && (
+                  <div className="flex items-center gap-2 text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded px-2 py-1">
+                    methods disagree — the vector and lexical engines reach opposite verdicts on this pair
+                  </div>
+                )}
+
+                <div className="text-gray-500 font-mono truncate" title={compareResult.a}>
                   A: &ldquo;{compareResult.a}&rdquo;
                 </div>
                 <div className="text-gray-500 font-mono truncate" title={compareResult.b}>
@@ -1282,8 +1392,11 @@ export default function DevVectorSimilarityTester() {
                           <span className="text-sm font-medium text-gray-200 truncate" title={realPath}>
                             #{i + 1} {basename(realPath)}
                           </span>
-                          <span className="text-xs font-mono text-green-400 shrink-0">
-                            {(hit.score * 100).toFixed(1)}%
+                          <span
+                            className="text-xs text-gray-500 shrink-0"
+                            title="Vector score (AI) — cosine of this image's stored prompt vector vs the query"
+                          >
+                            AI <span className="font-mono text-green-400">{(hit.score * 100).toFixed(1)}%</span>
                           </span>
                         </div>
                         <p className="text-[11px] font-mono text-gray-500 mt-0.5 break-all" title={realPath}>
@@ -1296,6 +1409,23 @@ export default function DevVectorSimilarityTester() {
                         ) : (
                           <p className="text-[10px] font-mono text-gray-600 mt-0.5" title="Prompt text unknown — no scanned image carries this exact prompt hash">
                             prompt {hit.promptHash.slice(0, 8)}…
+                          </p>
+                        )}
+                        {hit.lexicalScore !== null && (
+                          <p
+                            className="text-[10px] text-gray-500 mt-0.5"
+                            title="Non-AI score: the pre-vector grouping engine's hybrid (jaccard+Levenshtein) between this image's stored prompt and the query — it merges at the fixed 0.85"
+                          >
+                            lexical vs query:{' '}
+                            <span
+                              className={`font-mono ${
+                                hit.lexicalScore >= LEXICAL_MATCH_THRESHOLD
+                                  ? 'text-green-400'
+                                  : 'text-gray-400'
+                              }`}
+                            >
+                              {(hit.lexicalScore * 100).toFixed(1)}%
+                            </span>
                           </p>
                         )}
                       </div>
